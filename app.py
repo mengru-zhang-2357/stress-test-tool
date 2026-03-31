@@ -386,6 +386,12 @@ def build_server():
                 df_cf['Item'] = df_cf['Item'].astype(str)
             return df_asset, df_liq, df_cf
 
+        def normalize_dividend_amount(div_amt: float, dividend_is_percent: bool) -> float:
+            """Normalize percent-style dividend inputs to decimal fractions."""
+            if dividend_is_percent and abs(div_amt) > 1.0:
+                return div_amt / 100.0
+            return div_amt
+
         # Scenario 1: V‑shaped recovery
         # Use reactive.calc instead of reactive.memoize (memoize is removed in recent Shiny versions).
         @reactive.calc
@@ -398,6 +404,7 @@ def build_server():
             div_amt = float(input.dividend_amount())
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
+            div_amt = normalize_dividend_amount(div_amt, dividend_is_percent)
             # Define predetermined returns: years 2 and 3 at +30 %, remainder normal
             scenario = {2: 0.30, 3: 0.30}
             df = simulate_portfolio(
@@ -459,6 +466,7 @@ def build_server():
             div_amt = float(input.dividend_amount())
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
+            div_amt = normalize_dividend_amount(div_amt, dividend_is_percent)
             # U‑shaped recovery: years 2–6 gradually recover (8% to 12%)
             scenario = {}
             if years >= 2:
@@ -602,6 +610,7 @@ def build_server():
             div_amt = float(input.dividend_amount())
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
+            div_amt = normalize_dividend_amount(div_amt, dividend_is_percent)
             n_paths = int(input.n_paths())
             # Run simulation
             res = run_multiple_simulations(
