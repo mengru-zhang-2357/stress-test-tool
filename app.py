@@ -20,9 +20,10 @@ enable cell editing, ``editable=True`` is passed to ``render.DataGrid``【925037
 from __future__ import annotations
 
 import pandas as pd
-import matplotlib.pyplot as plt
 from shiny import App, ui, render, reactive
 from typing import Tuple, Iterable
+import plotly.graph_objects as go
+from shinywidgets import output_widget, render_widget
 
 from stress_simulation import simulate_portfolio, run_multiple_simulations
 
@@ -56,8 +57,18 @@ asset_classes = ["Buyout", "Venture Capital", "Real Estate", "Natural Resources"
 default_cash_flows = pd.DataFrame({
     "Item": sum([[asset] * 5 for asset in asset_classes], []),
     "Projection Year": [1, 2, 3, 4, 5] * len(asset_classes),
-    "Capital Call %": [0.10, 0.10, 0.10, 0.10, 0.10] * len(asset_classes),
-    "Distribution %": [0.10, 0.10, 0.10, 0.10, 0.10] * len(asset_classes),
+    "Capital Call %": [
+        0.15, 0.18, 0.17, 0.16, 0.16,  # Buyout
+        0.07, 0.10, 0.10, 0.10, 0.10,  # Venture Capital
+        0.09, 0.09, 0.07, 0.07, 0.08,  # Real Estate
+        0.09, 0.12, 0.12, 0.13, 0.13,  # Natural Resources
+    ],
+    "Distribution %": [
+        0.12, 0.16, 0.18, 0.20, 0.22,  # Buyout
+        0.05, 0.11, 0.13, 0.13, 0.13,  # Venture Capital
+        0.11, 0.16, 0.18, 0.20, 0.20,  # Real Estate
+        0.18, 0.23, 0.21, 0.18, 0.18,  # Natural Resources
+    ],
 })
 
 
@@ -149,36 +160,36 @@ def build_app_ui() -> ui.NavbarPage:
                 ui.accordion_panel(
                     "V-shaped",
                     ui.row(
-                        ui.column(6, ui.div(ui.output_plot("v_market_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(ui.output_plot("v_nav_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("v_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("v_nav_plot"), class_="result-chart")),
                     ),
                     ui.row(
-                        ui.column(6, ui.div(ui.output_plot("v_beta_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(ui.output_plot("v_private_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("v_beta_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("v_private_plot"), class_="result-chart")),
                     ),
                     ui.input_action_button("show_v_table", "Show underlying data", class_="btn-outline-secondary"),
                 ),
                 ui.accordion_panel(
                     "U-shaped",
                     ui.row(
-                        ui.column(6, ui.div(ui.output_plot("u_market_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(ui.output_plot("u_nav_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("u_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("u_nav_plot"), class_="result-chart")),
                     ),
                     ui.row(
-                        ui.column(6, ui.div(ui.output_plot("u_beta_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(ui.output_plot("u_private_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("u_beta_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("u_private_plot"), class_="result-chart")),
                     ),
                     ui.input_action_button("show_u_table", "Show underlying data", class_="btn-outline-secondary"),
                 ),
                 ui.accordion_panel(
                     "Monte Carlo",
                     ui.row(
-                        ui.column(6, ui.div(ui.output_plot("mc_market_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(ui.output_plot("nav_fan_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("mc_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("nav_fan_plot"), class_="result-chart")),
                     ),
                     ui.row(
-                        ui.column(6, ui.div(ui.output_plot("beta_fan_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(ui.output_plot("private_fan_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("beta_fan_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("private_fan_plot"), class_="result-chart")),
                     ),
                 ),
             ),
@@ -622,24 +633,17 @@ def build_server():
             table['year'] = years
             return render.DataTable(table, filters=True)
 
-        @render.plot(alt="Market growth plot (V-shaped)")
+        @render_widget
         def v_market_plot():
             df = v_scenario_results()
-            # Create a matplotlib figure for the market growth of $1
-            fig, ax = plt.subplots()
-            if df.empty:
-                # Empty plot if no data
-                ax.plot([])
-            else:
-                growth = [1.0]
-                scenario_df = df[df['year'] > 0]
-                for mr in scenario_df['market_return']:
-                    growth.append(growth[-1] * (1.0 + mr))
-                years = [0] + scenario_df['year'].astype(int).tolist()
-                ax.plot(years, growth, marker='o')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Growth of $1')
-            ax.set_title('Market index growth (V-shaped)')
+            fig = go.Figure()
+            growth = [1.0]
+            scenario_df = df[df['year'] > 0]
+            for mr in scenario_df['market_return']:
+                growth.append(growth[-1] * (1.0 + mr))
+            years = [0] + scenario_df['year'].astype(int).tolist()
+            fig.add_trace(go.Scatter(x=years, y=growth, mode='lines+markers', name='Market'))
+            fig.update_layout(title='Market Index Growth (V-shaped)', xaxis_title='Year', yaxis_title='Growth of $1')
             return fig
 
         @render.data_frame
@@ -658,82 +662,65 @@ def build_server():
             table['year'] = years
             return render.DataTable(table, filters=True)
 
-        @render.plot(alt="Market growth plot (U-shaped)")
+        @render_widget
         def u_market_plot():
             df = u_scenario_results()
-            fig, ax = plt.subplots()
-            if df.empty:
-                ax.plot([])
-            else:
-                growth = [1.0]
-                scenario_df = df[df['year'] > 0]
-                for mr in scenario_df['market_return']:
-                    growth.append(growth[-1] * (1.0 + mr))
-                years = [0] + scenario_df['year'].astype(int).tolist()
-                ax.plot(years, growth, marker='o')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Growth of $1')
-            ax.set_title('Market index growth (U-shaped)')
+            fig = go.Figure()
+            growth = [1.0]
+            scenario_df = df[df['year'] > 0]
+            for mr in scenario_df['market_return']:
+                growth.append(growth[-1] * (1.0 + mr))
+            years = [0] + scenario_df['year'].astype(int).tolist()
+            fig.add_trace(go.Scatter(x=years, y=growth, mode='lines+markers', name='Market'))
+            fig.update_layout(title='Market Index Growth (U-shaped)', xaxis_title='Year', yaxis_title='Growth of $1')
             return fig
 
-        @render.plot(alt="V-shaped NAV path")
+        @render_widget
         def v_nav_plot():
             df = v_scenario_results()
-            fig, ax = plt.subplots()
-            ax.plot(df['year'], df['nav_total'], marker='o')
-            ax.set_title('NAV total path (V-shaped)')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('NAV')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV'))
+            fig.update_layout(title='NAV Growth (V-shaped)', xaxis_title='Year', yaxis_title='NAV')
             return fig
 
-        @render.plot(alt="V-shaped beta path")
+        @render_widget
         def v_beta_plot():
             df = v_scenario_results()
-            fig, ax = plt.subplots()
-            ax.plot(df['year'], df['beta_total'], marker='o')
-            ax.set_title('Beta total path (V-shaped)')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Beta')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['year'], y=df['beta_total'], mode='lines+markers', name='Beta'))
+            fig.update_layout(title='Beta Path (V-shaped)', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
             return fig
 
-        @render.plot(alt="V-shaped private path")
+        @render_widget
         def v_private_plot():
             df = v_scenario_results()
-            fig, ax = plt.subplots()
-            ax.plot(df['year'], df['private_total'], marker='o')
-            ax.set_title('Private total path (V-shaped)')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Private %')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['year'], y=df['private_total'], mode='lines+markers', name='Private'))
+            fig.update_layout(title='Private Asset Path (V-shaped)', xaxis_title='Year', yaxis_title='Private %')
             return fig
 
-        @render.plot(alt="U-shaped NAV path")
+        @render_widget
         def u_nav_plot():
             df = u_scenario_results()
-            fig, ax = plt.subplots()
-            ax.plot(df['year'], df['nav_total'], marker='o')
-            ax.set_title('NAV total path (U-shaped)')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('NAV')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV'))
+            fig.update_layout(title='NAV Growth (U-shaped)', xaxis_title='Year', yaxis_title='NAV')
             return fig
 
-        @render.plot(alt="U-shaped beta path")
+        @render_widget
         def u_beta_plot():
             df = u_scenario_results()
-            fig, ax = plt.subplots()
-            ax.plot(df['year'], df['beta_total'], marker='o')
-            ax.set_title('Beta total path (U-shaped)')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Beta')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['year'], y=df['beta_total'], mode='lines+markers', name='Beta'))
+            fig.update_layout(title='Beta Path (U-shaped)', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
             return fig
 
-        @render.plot(alt="U-shaped private path")
+        @render_widget
         def u_private_plot():
             df = u_scenario_results()
-            fig, ax = plt.subplots()
-            ax.plot(df['year'], df['private_total'], marker='o')
-            ax.set_title('Private total path (U-shaped)')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Private %')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['year'], y=df['private_total'], mode='lines+markers', name='Private'))
+            fig.update_layout(title='Private Asset Path (U-shaped)', xaxis_title='Year', yaxis_title='Private %')
             return fig
 
         # Monte Carlo simulation event reactive
@@ -782,18 +769,15 @@ def build_server():
             return q_df
 
         # Render fan charts
-        @render.plot(alt="Market index growth fan chart")
+        @render_widget
         def mc_market_plot():
             try:
                 df = mc_results()
             except Exception:
                 df = None
-            fig, ax = plt.subplots()
+            fig = go.Figure()
             if df is None or df.empty or 'market_return' not in df.columns:
-                ax.plot([])
-                ax.set_title('Market index growth fan chart')
-                ax.set_xlabel('Year')
-                ax.set_ylabel('Growth of $1')
+                fig.update_layout(title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1')
                 return fig
             growth_df = df[['path', 'year', 'market_return']].copy()
             growth_df = growth_df.sort_values(['path', 'year'])
@@ -805,26 +789,19 @@ def build_server():
                     baseline_row[col] = 1.0
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
                 for col in q_df.columns[1:]:
-                    ax.plot(q_df['Year'], q_df[col], label=col)
-                ax.legend()
-            ax.set_title('Market index growth fan chart')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Growth of $1')
+                    fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
+            fig.update_layout(title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1')
             return fig
 
-        @render.plot(alt="Portfolio NAV fan chart")
+        @render_widget
         def nav_fan_plot():
-            # Return a Matplotlib figure for the NAV fan chart
             try:
                 df = mc_results()
             except Exception:
                 df = None
+            fig = go.Figure()
             if df is None or df.empty:
-                fig, ax = plt.subplots()
-                ax.plot([])
-                ax.set_title('Portfolio NAV fan chart')
-                ax.set_xlabel('Year')
-                ax.set_ylabel('NAV')
+                fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV')
                 return fig
             q_df = compute_quantiles(df, 'nav_total')
             # Insert a baseline row (Year 0) corresponding to the starting portfolio NAV.
@@ -836,27 +813,20 @@ def build_server():
                 for col in q_df.columns[1:]:
                     baseline_row[col] = round(nav0, 2)
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
-            fig, ax = plt.subplots()
             for col in q_df.columns[1:]:
-                ax.plot(q_df['Year'], q_df[col], label=col)
-            ax.set_title('Portfolio NAV fan chart')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('NAV')
-            ax.legend()
+                fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
+            fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV')
             return fig
 
-        @render.plot(alt="Portfolio beta fan chart")
+        @render_widget
         def beta_fan_plot():
             try:
                 df = mc_results()
             except Exception:
                 df = None
+            fig = go.Figure()
             if df is None or df.empty:
-                fig, ax = plt.subplots()
-                ax.plot([])
-                ax.set_title('Portfolio beta fan chart')
-                ax.set_xlabel('Year')
-                ax.set_ylabel('Beta')
+                fig.update_layout(title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
                 return fig
             q_df = compute_quantiles(df, 'beta_total')
             # Insert a baseline row for Year 0 corresponding to the starting portfolio beta.
@@ -871,27 +841,20 @@ def build_server():
                 for col in q_df.columns[1:]:
                     baseline_row[col] = round(beta0, 2)
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
-            fig, ax = plt.subplots()
             for col in q_df.columns[1:]:
-                ax.plot(q_df['Year'], q_df[col], label=col)
-            ax.set_title('Portfolio beta fan chart')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Beta')
-            ax.legend()
+                fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
+            fig.update_layout(title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
             return fig
 
-        @render.plot(alt="Portfolio private % fan chart")
+        @render_widget
         def private_fan_plot():
             try:
                 df = mc_results()
             except Exception:
                 df = None
+            fig = go.Figure()
             if df is None or df.empty:
-                fig, ax = plt.subplots()
-                ax.plot([])
-                ax.set_title('Portfolio private % fan chart')
-                ax.set_xlabel('Year')
-                ax.set_ylabel('Private %')
+                fig.update_layout(title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %')
                 return fig
             q_df = compute_quantiles(df, 'private_total')
             # Insert a baseline row (Year 0) corresponding to the starting portfolio private fraction.
@@ -916,13 +879,9 @@ def build_server():
                 for col in q_df.columns[1:]:
                     baseline_row[col] = round(private0, 2)
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
-            fig, ax = plt.subplots()
             for col in q_df.columns[1:]:
-                ax.plot(q_df['Year'], q_df[col], label=col)
-            ax.set_title('Portfolio private % fan chart')
-            ax.set_xlabel('Year')
-            ax.set_ylabel('Private %')
-            ax.legend()
+                fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
+            fig.update_layout(title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %')
             return fig
 
     return server
