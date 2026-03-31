@@ -642,8 +642,14 @@ def build_server():
             for mr in scenario_df['market_return']:
                 growth.append(growth[-1] * (1.0 + mr))
             years = [0] + scenario_df['year'].astype(int).tolist()
-            fig.add_trace(go.Scatter(x=years, y=growth, mode='lines+markers', name='Market'))
-            fig.update_layout(title='Market Index Growth (V-shaped)', xaxis_title='Year', yaxis_title='Growth of $1')
+            fig.add_trace(go.Scatter(
+                x=years, y=growth, mode='lines+markers', name='Market',
+                hovertemplate='Year: %{x}<br>Growth: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(
+                title='Market Index Growth (V-shaped)', xaxis_title='Year', yaxis_title='Growth of $1',
+                template='plotly_white'
+            )
             return fig
 
         @render.data_frame
@@ -671,56 +677,86 @@ def build_server():
             for mr in scenario_df['market_return']:
                 growth.append(growth[-1] * (1.0 + mr))
             years = [0] + scenario_df['year'].astype(int).tolist()
-            fig.add_trace(go.Scatter(x=years, y=growth, mode='lines+markers', name='Market'))
-            fig.update_layout(title='Market Index Growth (U-shaped)', xaxis_title='Year', yaxis_title='Growth of $1')
+            fig.add_trace(go.Scatter(
+                x=years, y=growth, mode='lines+markers', name='Market',
+                hovertemplate='Year: %{x}<br>Growth: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(
+                title='Market Index Growth (U-shaped)', xaxis_title='Year', yaxis_title='Growth of $1',
+                template='plotly_white'
+            )
             return fig
 
         @render_widget
         def v_nav_plot():
             df = v_scenario_results()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV'))
-            fig.update_layout(title='NAV Growth (V-shaped)', xaxis_title='Year', yaxis_title='NAV')
+            fig.add_trace(go.Scatter(
+                x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV',
+                hovertemplate='Year: %{x}<br>NAV: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(title='NAV Growth (V-shaped)', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
             return fig
 
         @render_widget
         def v_beta_plot():
             df = v_scenario_results()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['year'], y=df['beta_total'], mode='lines+markers', name='Beta'))
-            fig.update_layout(title='Beta Path (V-shaped)', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
+            fig.add_trace(go.Scatter(
+                x=df['year'], y=df['beta_total'], mode='lines+markers', name='Beta',
+                hovertemplate='Year: %{x}<br>Beta: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(
+                title='Beta Path (V-shaped)', xaxis_title='Year', yaxis_title='Beta',
+                yaxis=dict(range=[0.55, 0.85]), template='plotly_white'
+            )
             return fig
 
         @render_widget
         def v_private_plot():
             df = v_scenario_results()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['year'], y=df['private_total'], mode='lines+markers', name='Private'))
-            fig.update_layout(title='Private Asset Path (V-shaped)', xaxis_title='Year', yaxis_title='Private %')
+            fig.add_trace(go.Scatter(
+                x=df['year'], y=df['private_total'], mode='lines+markers', name='Private',
+                hovertemplate='Year: %{x}<br>Private %: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(title='Private Asset Path (V-shaped)', xaxis_title='Year', yaxis_title='Private %', template='plotly_white')
             return fig
 
         @render_widget
         def u_nav_plot():
             df = u_scenario_results()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV'))
-            fig.update_layout(title='NAV Growth (U-shaped)', xaxis_title='Year', yaxis_title='NAV')
+            fig.add_trace(go.Scatter(
+                x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV',
+                hovertemplate='Year: %{x}<br>NAV: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(title='NAV Growth (U-shaped)', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
             return fig
 
         @render_widget
         def u_beta_plot():
             df = u_scenario_results()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['year'], y=df['beta_total'], mode='lines+markers', name='Beta'))
-            fig.update_layout(title='Beta Path (U-shaped)', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
+            fig.add_trace(go.Scatter(
+                x=df['year'], y=df['beta_total'], mode='lines+markers', name='Beta',
+                hovertemplate='Year: %{x}<br>Beta: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(
+                title='Beta Path (U-shaped)', xaxis_title='Year', yaxis_title='Beta',
+                yaxis=dict(range=[0.55, 0.85]), template='plotly_white'
+            )
             return fig
 
         @render_widget
         def u_private_plot():
             df = u_scenario_results()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['year'], y=df['private_total'], mode='lines+markers', name='Private'))
-            fig.update_layout(title='Private Asset Path (U-shaped)', xaxis_title='Year', yaxis_title='Private %')
+            fig.add_trace(go.Scatter(
+                x=df['year'], y=df['private_total'], mode='lines+markers', name='Private',
+                hovertemplate='Year: %{x}<br>Private %: %{y:.2f}<extra>%{fullData.name}</extra>'
+            ))
+            fig.update_layout(title='Private Asset Path (U-shaped)', xaxis_title='Year', yaxis_title='Private %', template='plotly_white')
             return fig
 
         # Monte Carlo simulation event reactive
@@ -777,7 +813,10 @@ def build_server():
                 df = None
             fig = go.Figure()
             if df is None or df.empty or 'market_return' not in df.columns:
-                fig.update_layout(title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1')
+                fig.update_layout(
+                    title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1',
+                    template='plotly_white'
+                )
                 return fig
             growth_df = df[['path', 'year', 'market_return']].copy()
             growth_df = growth_df.sort_values(['path', 'year'])
@@ -789,8 +828,14 @@ def build_server():
                     baseline_row[col] = 1.0
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
                 for col in q_df.columns[1:]:
-                    fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
-            fig.update_layout(title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1')
+                    fig.add_trace(go.Scatter(
+                        x=q_df['Year'], y=q_df[col], mode='lines', name=col,
+                        hovertemplate='Year: %{x}<br>Growth: %{y:.2f}<extra>%{fullData.name}</extra>'
+                    ))
+            fig.update_layout(
+                title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1',
+                template='plotly_white'
+            )
             return fig
 
         @render_widget
@@ -801,7 +846,7 @@ def build_server():
                 df = None
             fig = go.Figure()
             if df is None or df.empty:
-                fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV')
+                fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
                 return fig
             q_df = compute_quantiles(df, 'nav_total')
             # Insert a baseline row (Year 0) corresponding to the starting portfolio NAV.
@@ -814,8 +859,11 @@ def build_server():
                     baseline_row[col] = round(nav0, 2)
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
             for col in q_df.columns[1:]:
-                fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
-            fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV')
+                fig.add_trace(go.Scatter(
+                    x=q_df['Year'], y=q_df[col], mode='lines', name=col,
+                    hovertemplate='Year: %{x}<br>NAV: %{y:.2f}<extra>%{fullData.name}</extra>'
+                ))
+            fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
             return fig
 
         @render_widget
@@ -826,7 +874,10 @@ def build_server():
                 df = None
             fig = go.Figure()
             if df is None or df.empty:
-                fig.update_layout(title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
+                fig.update_layout(
+                    title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta',
+                    yaxis=dict(range=[0.55, 0.85]), template='plotly_white'
+                )
                 return fig
             q_df = compute_quantiles(df, 'beta_total')
             # Insert a baseline row for Year 0 corresponding to the starting portfolio beta.
@@ -842,8 +893,14 @@ def build_server():
                     baseline_row[col] = round(beta0, 2)
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
             for col in q_df.columns[1:]:
-                fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
-            fig.update_layout(title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta', yaxis=dict(range=[0.55, 0.85]))
+                fig.add_trace(go.Scatter(
+                    x=q_df['Year'], y=q_df[col], mode='lines', name=col,
+                    hovertemplate='Year: %{x}<br>Beta: %{y:.2f}<extra>%{fullData.name}</extra>'
+                ))
+            fig.update_layout(
+                title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta',
+                yaxis=dict(range=[0.55, 0.85]), template='plotly_white'
+            )
             return fig
 
         @render_widget
@@ -854,7 +911,10 @@ def build_server():
                 df = None
             fig = go.Figure()
             if df is None or df.empty:
-                fig.update_layout(title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %')
+                fig.update_layout(
+                    title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %',
+                    template='plotly_white'
+                )
                 return fig
             q_df = compute_quantiles(df, 'private_total')
             # Insert a baseline row (Year 0) corresponding to the starting portfolio private fraction.
@@ -880,8 +940,14 @@ def build_server():
                     baseline_row[col] = round(private0, 2)
                 q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
             for col in q_df.columns[1:]:
-                fig.add_trace(go.Scatter(x=q_df['Year'], y=q_df[col], mode='lines', name=col))
-            fig.update_layout(title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %')
+                fig.add_trace(go.Scatter(
+                    x=q_df['Year'], y=q_df[col], mode='lines', name=col,
+                    hovertemplate='Year: %{x}<br>Private %: %{y:.2f}<extra>%{fullData.name}</extra>'
+                ))
+            fig.update_layout(
+                title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %',
+                template='plotly_white'
+            )
             return fig
 
     return server
