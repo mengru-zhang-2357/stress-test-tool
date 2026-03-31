@@ -67,6 +67,10 @@ def build_app_ui() -> ui.NavbarPage:
     # and the title as a named keyword argument (title=...).  This avoids errors
     # where the first argument is interpreted as a navigation item instead of the title.
     return ui.page_navbar(
+        ui.tags.style("""
+            .row-action-btn { width: 220px; margin-top: 0.4rem; margin-bottom: 0.4rem; }
+            .result-chart { margin-bottom: 1rem; }
+        """),
         # First tab: inputs
         ui.nav_panel(
             "Inputs",
@@ -114,8 +118,8 @@ def build_app_ui() -> ui.NavbarPage:
                 ),
                 ui.output_data_frame("asset_alloc_table"),
                 # Buttons to add or delete rows in the asset allocation table
-                ui.input_action_button("add_asset_row", "Add row"),
-                ui.input_action_button("delete_asset_row", "Delete selected row(s)", class_="btn-danger"),
+                ui.input_action_button("add_asset_row", "Add row", class_="row-action-btn"),
+                ui.input_action_button("delete_asset_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
                 ui.br(),
                 ui.h3("Liquidity waterfall"),
                 ui.p(
@@ -124,8 +128,8 @@ def build_app_ui() -> ui.NavbarPage:
                     "are appended to the end of the waterfall."
                 ),
                 ui.output_data_frame("liquidity_table"),
-                ui.input_action_button("add_liq_row", "Add row"),
-                ui.input_action_button("delete_liq_row", "Delete selected row(s)", class_="btn-danger"),
+                ui.input_action_button("add_liq_row", "Add row", class_="row-action-btn"),
+                ui.input_action_button("delete_liq_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
                 ui.br(),
                 ui.h3("Private asset cash flows"),
                 ui.p(
@@ -133,38 +137,50 @@ def build_app_ui() -> ui.NavbarPage:
                     "percentages by projection year.  Percentages can be decimals or percent values."
                 ),
                 ui.output_data_frame("cash_flow_table"),
-                ui.input_action_button("add_cf_row", "Add row"),
-                ui.input_action_button("delete_cf_row", "Delete selected row(s)", class_="btn-danger"),
+                ui.input_action_button("add_cf_row", "Add row", class_="row-action-btn"),
+                ui.input_action_button("delete_cf_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
             ),
         ),
         # Second tab: results
         ui.nav_panel(
             "Results",
-            ui.h3("Deterministic scenarios"),
-            ui.row(
-                ui.column(
-                    6,
-                    ui.h4("V‑shaped recovery"),
-                    ui.output_data_frame("v_scenario_table"),
-                    ui.output_plot("v_market_plot"),
+            ui.h3("Scenario outputs"),
+            ui.accordion(
+                ui.accordion_panel(
+                    "V-shaped",
+                    ui.row(
+                        ui.column(6, ui.div(ui.output_plot("v_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(ui.output_plot("v_nav_plot"), class_="result-chart")),
+                    ),
+                    ui.row(
+                        ui.column(6, ui.div(ui.output_plot("v_beta_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(ui.output_plot("v_private_plot"), class_="result-chart")),
+                    ),
+                    ui.input_action_button("show_v_table", "Show underlying data", class_="btn-outline-secondary"),
                 ),
-                ui.column(
-                    6,
-                    ui.h4("U‑shaped recovery"),
-                    ui.output_data_frame("u_scenario_table"),
-                    ui.output_plot("u_market_plot"),
+                ui.accordion_panel(
+                    "U-shaped",
+                    ui.row(
+                        ui.column(6, ui.div(ui.output_plot("u_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(ui.output_plot("u_nav_plot"), class_="result-chart")),
+                    ),
+                    ui.row(
+                        ui.column(6, ui.div(ui.output_plot("u_beta_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(ui.output_plot("u_private_plot"), class_="result-chart")),
+                    ),
+                    ui.input_action_button("show_u_table", "Show underlying data", class_="btn-outline-secondary"),
                 ),
-            ),
-            ui.hr(),
-            ui.h3("Monte Carlo simulation"),
-            ui.p(
-                "Specify the number of random paths above and click "
-                "\"Simulate\" to generate fan charts for portfolio NAV, beta, and private percentages."
-            ),
-            ui.row(
-                ui.column(4, ui.output_plot("nav_fan_plot")),
-                ui.column(4, ui.output_plot("beta_fan_plot")),
-                ui.column(4, ui.output_plot("private_fan_plot")),
+                ui.accordion_panel(
+                    "Monte Carlo",
+                    ui.row(
+                        ui.column(6, ui.div(ui.output_plot("mc_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(ui.output_plot("nav_fan_plot"), class_="result-chart")),
+                    ),
+                    ui.row(
+                        ui.column(6, ui.div(ui.output_plot("beta_fan_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(ui.output_plot("private_fan_plot"), class_="result-chart")),
+                    ),
+                ),
             ),
         ),
         title="Portfolio Stress Test",
@@ -527,7 +543,65 @@ def build_server():
             df = pd.concat([baseline_row, df], ignore_index=True)
             return df
 
+        def format_scenario_table(df: pd.DataFrame) -> pd.DataFrame:
+            display_names = {
+                'year': 'Year',
+                'nav_total_pre': 'NAV before dividend',
+                'nav_total_post': 'NAV after dividend',
+                'nav_total': 'NAV after rebalance',
+                'beta_pre': 'Beta before dividend',
+                'beta_post': 'Beta after dividend',
+                'beta_total': 'Beta after rebalance',
+                'private_pre': 'Private % before dividend',
+                'private_post': 'Private % after dividend',
+                'private_total': 'Private % after rebalance',
+                'market_return': 'Market return',
+            }
+            table = df[list(display_names.keys())].copy().rename(columns=display_names)
+            nav_cols = ['NAV before dividend', 'NAV after dividend', 'NAV after rebalance']
+            for col in nav_cols:
+                table[col] = table[col].map(lambda x: f"${float(x):,.2f}")
+            pct_cols = ['Private % before dividend', 'Private % after dividend', 'Private % after rebalance', 'Market return']
+            for col in pct_cols:
+                table[col] = table[col].map(lambda x: f"{float(x) * 100:.2f}%")
+            for col in ['Beta before dividend', 'Beta after dividend', 'Beta after rebalance']:
+                table[col] = table[col].map(lambda x: round(float(x), 3))
+            table['Year'] = table['Year'].astype(int)
+            return table
+
+        def show_table_modal(title: str, table_df: pd.DataFrame):
+            ui.modal_show(
+                ui.modal(
+                    ui.p("Column guide: pre = after return/cash-flow and before dividend; post = after dividend; after rebalance = final year-end value."),
+                    ui.output_data_frame("scenario_modal_table"),
+                    title=title,
+                    size="l",
+                    easy_close=True,
+                    footer=ui.modal_button("Close"),
+                )
+            )
+            modal_table_val.set(table_df)
+
+        modal_table_val = reactive.value(pd.DataFrame())
+
         # Render scenario tables and plots
+        @render.data_frame
+        def scenario_modal_table():
+            df = modal_table_val()
+            if df is None or df.empty:
+                return render.DataTable(pd.DataFrame())
+            return render.DataTable(df, filters=True)
+
+        @reactive.effect
+        @reactive.event(input.show_v_table)
+        def _show_v_table_modal():
+            show_table_modal("V-shaped scenario data", format_scenario_table(v_scenario_results()))
+
+        @reactive.effect
+        @reactive.event(input.show_u_table)
+        def _show_u_table_modal():
+            show_table_modal("U-shaped scenario data", format_scenario_table(u_scenario_results()))
+
         @render.data_frame
         def v_scenario_table():
             df = v_scenario_results()
@@ -558,9 +632,10 @@ def build_server():
                 ax.plot([])
             else:
                 growth = [1.0]
-                for mr in df['market_return']:
+                scenario_df = df[df['year'] > 0]
+                for mr in scenario_df['market_return']:
                     growth.append(growth[-1] * (1.0 + mr))
-                years = list(range(0, len(growth)))
+                years = [0] + scenario_df['year'].astype(int).tolist()
                 ax.plot(years, growth, marker='o')
             ax.set_xlabel('Year')
             ax.set_ylabel('Growth of $1')
@@ -591,13 +666,74 @@ def build_server():
                 ax.plot([])
             else:
                 growth = [1.0]
-                for mr in df['market_return']:
+                scenario_df = df[df['year'] > 0]
+                for mr in scenario_df['market_return']:
                     growth.append(growth[-1] * (1.0 + mr))
-                years = list(range(0, len(growth)))
+                years = [0] + scenario_df['year'].astype(int).tolist()
                 ax.plot(years, growth, marker='o')
             ax.set_xlabel('Year')
             ax.set_ylabel('Growth of $1')
             ax.set_title('Market index growth (U-shaped)')
+            return fig
+
+        @render.plot(alt="V-shaped NAV path")
+        def v_nav_plot():
+            df = v_scenario_results()
+            fig, ax = plt.subplots()
+            ax.plot(df['year'], df['nav_total'], marker='o')
+            ax.set_title('NAV total path (V-shaped)')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('NAV')
+            return fig
+
+        @render.plot(alt="V-shaped beta path")
+        def v_beta_plot():
+            df = v_scenario_results()
+            fig, ax = plt.subplots()
+            ax.plot(df['year'], df['beta_total'], marker='o')
+            ax.set_title('Beta total path (V-shaped)')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('Beta')
+            return fig
+
+        @render.plot(alt="V-shaped private path")
+        def v_private_plot():
+            df = v_scenario_results()
+            fig, ax = plt.subplots()
+            ax.plot(df['year'], df['private_total'], marker='o')
+            ax.set_title('Private total path (V-shaped)')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('Private %')
+            return fig
+
+        @render.plot(alt="U-shaped NAV path")
+        def u_nav_plot():
+            df = u_scenario_results()
+            fig, ax = plt.subplots()
+            ax.plot(df['year'], df['nav_total'], marker='o')
+            ax.set_title('NAV total path (U-shaped)')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('NAV')
+            return fig
+
+        @render.plot(alt="U-shaped beta path")
+        def u_beta_plot():
+            df = u_scenario_results()
+            fig, ax = plt.subplots()
+            ax.plot(df['year'], df['beta_total'], marker='o')
+            ax.set_title('Beta total path (U-shaped)')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('Beta')
+            return fig
+
+        @render.plot(alt="U-shaped private path")
+        def u_private_plot():
+            df = u_scenario_results()
+            fig, ax = plt.subplots()
+            ax.plot(df['year'], df['private_total'], marker='o')
+            ax.set_title('Private total path (U-shaped)')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('Private %')
             return fig
 
         # Monte Carlo simulation event reactive
@@ -646,6 +782,36 @@ def build_server():
             return q_df
 
         # Render fan charts
+        @render.plot(alt="Market index growth fan chart")
+        def mc_market_plot():
+            try:
+                df = mc_results()
+            except Exception:
+                df = None
+            fig, ax = plt.subplots()
+            if df is None or df.empty or 'market_return' not in df.columns:
+                ax.plot([])
+                ax.set_title('Market index growth fan chart')
+                ax.set_xlabel('Year')
+                ax.set_ylabel('Growth of $1')
+                return fig
+            growth_df = df[['path', 'year', 'market_return']].copy()
+            growth_df = growth_df.sort_values(['path', 'year'])
+            growth_df['growth'] = growth_df.groupby('path')['market_return'].transform(lambda s: (1 + s).cumprod())
+            q_df = compute_quantiles(growth_df.rename(columns={'growth': 'market_growth'}), 'market_growth')
+            if not q_df.empty:
+                baseline_row = {'Year': 0}
+                for col in q_df.columns[1:]:
+                    baseline_row[col] = 1.0
+                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
+                for col in q_df.columns[1:]:
+                    ax.plot(q_df['Year'], q_df[col], label=col)
+                ax.legend()
+            ax.set_title('Market index growth fan chart')
+            ax.set_xlabel('Year')
+            ax.set_ylabel('Growth of $1')
+            return fig
+
         @render.plot(alt="Portfolio NAV fan chart")
         def nav_fan_plot():
             # Return a Matplotlib figure for the NAV fan chart

@@ -774,5 +774,6 @@ def run_multiple_simulations(
                 'beta_total': row['beta_total'],
                 'private_total': row['private_total'],
                 'monthly_liq_total': row['monthly_liq_total'],
+                'market_return': row['market_return'],
             })
     return pd.DataFrame(records)
