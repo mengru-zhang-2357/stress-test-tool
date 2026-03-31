@@ -314,8 +314,12 @@ def _compute_portfolio_metrics(items: Dict[str, LineItem]) -> Tuple[float, float
 
 
 def _apply_private_cash_flows(
-    items: Dict[str, LineItem], cash_flows: Dict[str, Dict[int, Tuple[float, float]]],
-    year: int, baseline_return: float, market_return: float, cash_item_name: str
+    items: Dict[str, LineItem],
+    cash_flows: Dict[str, Dict[int, Tuple[float, float]]],
+    year: int,
+    baseline_return: float,
+    market_return: float,
+    cash_item_name: str,
 ) -> None:
     """Apply capital calls and distributions for private assets in a given year.
 
@@ -337,11 +341,13 @@ def _apply_private_cash_flows(
     """
     # Determine which item acts as the cash bucket
     cash_li = items[cash_item_name]
-    # Precompute difference between baseline return and market return
-    diff = baseline_return - market_return
     for name, li in items.items():
         # Skip cash bucket itself
         if name == cash_item_name:
+            continue
+        # Only items that show up in the cash flow table follow the
+        # private cash-flow branch.
+        if name not in cash_flows:
             continue
         # Starting NAV for call/distribution calculations
         starting_nav = li.nav
@@ -353,23 +359,13 @@ def _apply_private_cash_flows(
             call_pct, dist_pct = cash_flows[name][year]
         else:
             call_pct, dist_pct = 0.0, 0.0
-        # Determine whether to apply return and cash‑flow adjustments to this item.
-        # In year 1, apply to all items (both public and private) since returns
-        # are not applied elsewhere.  In subsequent years, returns for public
-        # assets have already been applied in _apply_public_returns.  We only
-        # apply return adjustments here if the item is considered private
-        # (li.private > 0) or if it has explicit call or distribution flows.
-        apply_cf_and_return = True
-        if year > 1:
-            apply_cf_and_return = (li.private > 0.0) or (call_pct != 0.0 or dist_pct != 0.0)
-        if not apply_cf_and_return:
-            # No adjustments for this item in years > 1.  Skip to next.
-            continue
         # Compute call and distribution amounts based on the starting NAV
         call_amt = starting_nav * call_pct
         dist_amt = starting_nav * dist_pct
         # Apply return shock to NAV (beta * market_return) for this item
         shock_return = li.beta * market_return
+        # Diff is item-specific: baseline return minus this item's applied shock return.
+        diff = baseline_return - shock_return
         nav_after_return = starting_nav * (1.0 + shock_return)
         # Adjust for calls and distributions
         nav_after_cf = nav_after_return + call_amt * (1.0 + diff) - dist_amt * (1.0 + 2.0 * diff)
@@ -388,7 +384,12 @@ def _apply_private_cash_flows(
         cash_li.nav = 0.0
 
 
-def _apply_public_returns(items: Dict[str, LineItem], market_return: float, cash_item_name: str) -> None:
+def _apply_public_returns(
+    items: Dict[str, LineItem],
+    market_return: float,
+    cash_item_name: str,
+    private_cash_flow_items: Optional[Iterable[str]] = None,
+) -> None:
     """Apply market return to public (non‑private) assets.
 
     This function multiplies the NAV of each non‑cash, non‑private item by
@@ -402,10 +403,10 @@ def _apply_public_returns(items: Dict[str, LineItem], market_return: float, cash
         market_return: Equity market return for the year.
         cash_item_name: Name of the cash bucket.
     """
+    cf_item_set = set(private_cash_flow_items or [])
     for name, li in items.items():
-        # Skip the cash bucket and private assets.  Private assets (where
-        # li.private > 0) receive their return shock in _apply_private_cash_flows.
-        if name == cash_item_name or li.private > 0.0:
+        # Skip the cash bucket and assets handled by the private cash-flow branch.
+        if name == cash_item_name or name in cf_item_set:
             continue
         # Apply return shock: Beta times market return
         shock_return = li.beta * market_return
@@ -630,6 +631,7 @@ def simulate_portfolio(
     if scenario_returns:
         for k, v in scenario_returns.items():
             market_returns[k] = v
+    private_cash_flow_items = set(cash_flows.keys())
     # Simulate each year
     for year in range(1, n_years + 1):
         # Determine market return for this year
@@ -637,15 +639,23 @@ def simulate_portfolio(
             mr = float(market_returns[year])
         else:
             mr = float(rng.normal(loc=mean_return, scale=std_dev))
-        # Apply returns and private cash flows
-        if year == 1:
-            # Year 1 uses a fixed –40 % shock and private cash flows
-            _apply_private_cash_flows(items, cash_flows, year, baseline_return, mr, cash_item_name)
-        else:
-            # Apply public returns first
-            _apply_public_returns(items, mr, cash_item_name)
-            # Then apply private cash flows (calls/distributions)
-            _apply_private_cash_flows(items, cash_flows, year, baseline_return, mr, cash_item_name)
+        # Apply returns in two branches:
+        # 1) items in cash flow table -> private cash-flow logic
+        # 2) all other items -> public return logic
+        _apply_public_returns(
+            items,
+            mr,
+            cash_item_name,
+            private_cash_flow_items=private_cash_flow_items,
+        )
+        _apply_private_cash_flows(
+            items,
+            cash_flows,
+            year,
+            baseline_return,
+            mr,
+            cash_item_name,
+        )
         # Compute metrics before dividend
         total_nav_pre, beta_pre, private_pre = _compute_portfolio_metrics(items)
         monthly_liq_pre = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_pre if total_nav_pre > 0 else 0.0
