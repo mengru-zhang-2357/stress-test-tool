@@ -67,13 +67,13 @@ def build_app_ui() -> ui.NavbarPage:
     # and the title as a named keyword argument (title=...).  This avoids errors
     # where the first argument is interpreted as a navigation item instead of the title.
     return ui.page_navbar(
-        ui.tags.style("""
-            .row-action-btn { width: 220px; margin-top: 0.4rem; margin-bottom: 0.4rem; }
-            .result-chart { margin-bottom: 1rem; }
-        """),
         # First tab: inputs
         ui.nav_panel(
             "Inputs",
+            ui.tags.style("""
+                .row-action-btn { width: 220px; margin-top: 0.4rem; margin-bottom: 0.4rem; }
+                .result-chart { margin-bottom: 1rem; }
+            """),
             ui.layout_sidebar(
                 # Sidebar is provided as the first argument. The following arguments define the main content.
                 ui.sidebar(
