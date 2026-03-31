@@ -483,18 +483,18 @@ def build_server():
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
             div_amt = normalize_dividend_amount(div_amt, dividend_is_percent)
-            # U‑shaped recovery: years 2–6 gradually recover (8% to 12%)
+            # U‑shaped recovery: years 2–6 gradually recover (ACWI 2009-2013 returns)
             scenario = {}
             if years >= 2:
-                scenario[2] = 0.08
+                scenario[2] = 0.35
             if years >= 3:
-                scenario[3] = 0.09
+                scenario[3] = 0.13
             if years >= 4:
-                scenario[4] = 0.10
+                scenario[4] = -0.07
             if years >= 5:
-                scenario[5] = 0.11
+                scenario[5] = 0.16
             if years >= 6:
-                scenario[6] = 0.12
+                scenario[6] = 0.23
             df = simulate_portfolio(
                 asset_alloc_df=df_asset,
                 liquidity_df=df_liq,
