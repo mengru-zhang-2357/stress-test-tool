@@ -485,68 +485,71 @@ def _rebalance_portfolio(
             the current beta lies outside ``beta_start ± tolerance``, the
             function rebalances to exactly ``beta_start``.
     """
-    # Compute current beta and total NAV
-    total_nav, beta_current, _ = _compute_portfolio_metrics(items)
-    if total_nav <= 0:
-        return
-    diff = beta_start - beta_current
-    if abs(diff) <= tolerance:
-        return
-    # Determine the amount of NAV to move
-    nav_change = abs(diff) * total_nav
-    if diff > 0:
-        # Current beta is below target: increase beta by buying high‑beta
-        # assets using liquid capital from low‑beta assets.
-        # Identify the highest beta asset (excluding cash) to buy.
+    max_iters = 1_000
+    min_effect = 1e-12
+    for _ in range(max_iters):
+        total_nav, beta_current, _ = _compute_portfolio_metrics(items)
+        if total_nav <= 0:
+            return
+        diff = beta_start - beta_current
+        if abs(diff) <= tolerance:
+            return
+
+        moved_any = False
         non_cash_items = [li for li in items.values() if li.name != 'Cash' and li.nav > 0]
         if not non_cash_items:
             return
-        target_li = max(non_cash_items, key=lambda li: li.beta)
-        # Source capital from liquid low‑beta assets (including cash)
-        # sorted by increasing beta
-        source_items = sorted(non_cash_items + [items['Cash']], key=lambda li: li.beta)
-        # We will allocate nav_change amount to the target item
-        remaining = nav_change
-        # Collect from sources until we have enough
-        for src in source_items:
-            if src is target_li:
-                continue
-            # available liquid amount in this source
-            available = src.liquid_amount()
-            amt = min(available, remaining)
-            if amt > 0:
-                src.update_after_sale(amt)
-                remaining -= amt
-            if remaining <= 1e-12:
+
+        if diff > 0:
+            # Increase beta: move liquid dollars from lower-beta sources to
+            # the highest-beta destination.
+            dst = max(non_cash_items, key=lambda li: li.beta)
+            sources = sorted(
+                [li for li in items.values() if li is not dst and li.nav > 0 and li.liquid_amount() > 0],
+                key=lambda li: li.beta,
+            )
+            needed_beta_gap = diff
+            for src in sources:
+                per_dollar_lift = (dst.beta - src.beta) / total_nav
+                if per_dollar_lift <= min_effect:
+                    continue
+                available = src.liquid_amount()
+                transfer_amount = min(available, needed_beta_gap / per_dollar_lift)
+                if transfer_amount <= 0:
+                    continue
+                src.update_after_sale(transfer_amount)
+                dst.add_investment(transfer_amount, liquid=True)
+                moved_any = True
                 break
-        if remaining > 1e-6:
-            # Not enough liquidity; limit the purchase to what was sold
-            nav_change -= remaining
-        # Add the purchased amount to the target item as liquid
-        if nav_change > 0:
-            target_li.add_investment(nav_change, liquid=True)
-    else:
-        # Current beta is above target: decrease beta by selling high‑beta
-        # assets and sending proceeds to cash.
-        high_beta_items = [li for li in items.values() if li.name != 'Cash' and li.nav > 0]
-        if not high_beta_items:
+        else:
+            # Decrease beta: move from higher-beta sources to a low-beta sink.
+            sink = items.get('Cash')
+            if sink is None:
+                sink_candidates = [li for li in items.values() if li.nav >= 0]
+                if not sink_candidates:
+                    return
+                sink = min(sink_candidates, key=lambda li: li.beta)
+            needed_beta_gap = -diff
+            sources = sorted(
+                [li for li in non_cash_items if li is not sink and li.liquid_amount() > 0],
+                key=lambda li: li.beta,
+                reverse=True,
+            )
+            for src in sources:
+                per_dollar_reduction = (src.beta - sink.beta) / total_nav
+                if per_dollar_reduction <= min_effect:
+                    continue
+                available = src.liquid_amount()
+                transfer_amount = min(available, needed_beta_gap / per_dollar_reduction)
+                if transfer_amount <= 0:
+                    continue
+                src.update_after_sale(transfer_amount)
+                sink.add_investment(transfer_amount, liquid=True)
+                moved_any = True
+                break
+
+        if not moved_any:
             return
-        target_li = max(high_beta_items, key=lambda li: li.beta)
-        remaining = nav_change
-        # Sell from high‑beta items (starting with the highest beta) until
-        # we accumulate nav_change; proceeds go to cash.
-        cash_li = items['Cash']
-        for src in sorted(high_beta_items, key=lambda li: li.beta, reverse=True):
-            # available liquid amount to sell
-            available = src.liquid_amount()
-            amt = min(available, remaining)
-            if amt > 0:
-                src.update_after_sale(amt)
-                cash_li.add_investment(amt, liquid=True)
-                remaining -= amt
-            if remaining <= 1e-12:
-                break
-        # If not enough was sold, rebalancing is limited by available liquidity.
     return
 
 
