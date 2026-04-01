@@ -71,6 +71,10 @@ default_cash_flows = pd.DataFrame({
     ],
 })
 
+ASSET_ALLOC_COLUMNS = ['Item', 'Allocation', 'Beta', 'Monthly Liquidity %', 'Private %']
+LIQUIDITY_COLUMNS = ['Item', 'Liquidity Order']
+CASH_FLOW_COLUMNS = ['Item', 'Projection Year', 'Capital Call %', 'Distribution %']
+
 
 def build_app_ui() -> ui.NavbarPage:
     """Construct the Shiny user interface."""
@@ -128,6 +132,12 @@ def build_app_ui() -> ui.NavbarPage:
                     "percentages can be specified either as decimals (e.g. 0.8) or percentages (e.g. 80)."
                 ),
                 ui.output_data_frame("asset_alloc_table"),
+                ui.input_file(
+                    "asset_alloc_csv",
+                    "Upload asset allocation CSV",
+                    accept=[".csv"],
+                    multiple=False,
+                ),
                 # Buttons to add or delete rows in the asset allocation table
                 ui.input_action_button("add_asset_row", "Add row", class_="row-action-btn"),
                 ui.input_action_button("delete_asset_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
@@ -139,6 +149,12 @@ def build_app_ui() -> ui.NavbarPage:
                     "are appended to the end of the waterfall."
                 ),
                 ui.output_data_frame("liquidity_table"),
+                ui.input_file(
+                    "liquidity_csv",
+                    "Upload liquidity waterfall CSV",
+                    accept=[".csv"],
+                    multiple=False,
+                ),
                 ui.input_action_button("add_liq_row", "Add row", class_="row-action-btn"),
                 ui.input_action_button("delete_liq_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
                 ui.br(),
@@ -148,6 +164,12 @@ def build_app_ui() -> ui.NavbarPage:
                     "percentages by projection year.  Percentages can be decimals or percent values."
                 ),
                 ui.output_data_frame("cash_flow_table"),
+                ui.input_file(
+                    "cash_flow_csv",
+                    "Upload private cash flow CSV",
+                    accept=[".csv"],
+                    multiple=False,
+                ),
                 ui.input_action_button("add_cf_row", "Add row", class_="row-action-btn"),
                 ui.input_action_button("delete_cf_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
             ),
@@ -213,6 +235,22 @@ def build_server():
         liq_df_val = reactive.value(default_liquidity.copy())
         cf_df_val = reactive.value(default_cash_flows.copy())
 
+        def read_uploaded_csv(file_info, required_columns: list[str]) -> pd.DataFrame:
+            """Read and validate an uploaded CSV file."""
+            if not file_info:
+                raise ValueError("No file provided.")
+            upload = file_info[0]
+            df = pd.read_csv(upload["datapath"])
+            missing = [col for col in required_columns if col not in df.columns]
+            if missing:
+                raise ValueError(
+                    "CSV is missing required column(s): "
+                    + ", ".join(missing)
+                    + ". Expected columns: "
+                    + ", ".join(required_columns)
+                )
+            return df[required_columns].copy()
+
         # --- Data tables: asset allocation ---
         @render.data_frame
         def asset_alloc_table():
@@ -239,6 +277,45 @@ def build_server():
                 editable=True,
                 selection_mode="rows",
             )
+
+        @reactive.effect
+        @reactive.event(input.asset_alloc_csv)
+        def upload_asset_alloc_csv_event():
+            file_info = input.asset_alloc_csv()
+            if not file_info:
+                return
+            try:
+                df = read_uploaded_csv(file_info, ASSET_ALLOC_COLUMNS)
+                asset_df_val.set(df.reset_index(drop=True))
+                ui.notification_show("Asset allocation CSV loaded.", type="message")
+            except Exception as exc:
+                ui.notification_show(f"Asset allocation CSV upload failed: {exc}", type="error", duration=8)
+
+        @reactive.effect
+        @reactive.event(input.liquidity_csv)
+        def upload_liquidity_csv_event():
+            file_info = input.liquidity_csv()
+            if not file_info:
+                return
+            try:
+                df = read_uploaded_csv(file_info, LIQUIDITY_COLUMNS)
+                liq_df_val.set(df.reset_index(drop=True))
+                ui.notification_show("Liquidity waterfall CSV loaded.", type="message")
+            except Exception as exc:
+                ui.notification_show(f"Liquidity CSV upload failed: {exc}", type="error", duration=8)
+
+        @reactive.effect
+        @reactive.event(input.cash_flow_csv)
+        def upload_cash_flow_csv_event():
+            file_info = input.cash_flow_csv()
+            if not file_info:
+                return
+            try:
+                df = read_uploaded_csv(file_info, CASH_FLOW_COLUMNS)
+                cf_df_val.set(df.reset_index(drop=True))
+                ui.notification_show("Private cash flow CSV loaded.", type="message")
+            except Exception as exc:
+                ui.notification_show(f"Cash flow CSV upload failed: {exc}", type="error", duration=8)
 
         # Handle adding new rows to each table when the user clicks the
         # corresponding Add row button.  These functions update the reactive
@@ -394,7 +471,7 @@ def build_server():
             df_cf: pd.DataFrame = cash_flow_table.data_view().reset_index(drop=True)
             # Coerce numeric columns in asset allocation
             if not df_asset.empty:
-                num_cols = ['Allocation', 'Beta', 'Monthly Liquidity %', 'Private %']
+                num_cols = ASSET_ALLOC_COLUMNS[1:]
                 for col in num_cols:
                     if col in df_asset.columns:
                         df_asset[col] = pd.to_numeric(df_asset[col], errors='coerce').fillna(0.0)
@@ -407,7 +484,7 @@ def build_server():
                 df_liq['Item'] = df_liq['Item'].astype(str)
             # Coerce numeric columns in cash flow table
             if not df_cf.empty:
-                for col in ['Projection Year', 'Capital Call %', 'Distribution %']:
+                for col in CASH_FLOW_COLUMNS[1:]:
                     if col in df_cf.columns:
                         df_cf[col] = pd.to_numeric(df_cf[col], errors='coerce').fillna(0.0)
                 df_cf['Item'] = df_cf['Item'].astype(str)
