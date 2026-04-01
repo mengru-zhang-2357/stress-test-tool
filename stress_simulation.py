@@ -366,7 +366,7 @@ def _apply_private_cash_flows(
         shock_return = li.beta * market_return
         # Diff is item-specific: baseline return minus this item's applied shock return.
         diff = baseline_return - shock_return
-        nav_after_return = starting_nav * (1.0 + shock_return)
+        nav_after_return = starting_nav * (1.0 + 0.6 * shock_return)
         # Adjust for calls and distributions
         nav_after_cf = nav_after_return + call_amt * (1.0 + diff) - dist_amt * (1.0 + 2.0 * diff)
         # Compute net cash flow
