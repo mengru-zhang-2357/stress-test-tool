@@ -496,6 +496,52 @@ def build_server():
                 return div_amt / 100.0
             return div_amt
 
+        def build_item_allocation_frame(scenario_df: pd.DataFrame, df_asset: pd.DataFrame) -> pd.DataFrame:
+            """Build per-year, per-item post-rebalance NAV and private-contribution data."""
+            records = []
+            # Year 0 baseline: use starting allocations directly.
+            year0_nav = float(df_asset['Allocation'].sum()) if not df_asset.empty else 0.0
+            for _, row in df_asset.iterrows():
+                item = str(row.get('Item', '')).strip()
+                if not item:
+                    continue
+                nav_val = float(row.get('Allocation', 0.0) or 0.0)
+                private_frac = float(row.get('Private %', 0.0) or 0.0)
+                if abs(private_frac) > 1.0:
+                    private_frac /= 100.0
+                private_contribution = (nav_val * private_frac / year0_nav) if year0_nav > 0 else 0.0
+                records.append(
+                    {
+                        'year': 0,
+                        'item': item,
+                        'nav': nav_val,
+                        'private_pct_contribution': private_contribution,
+                    }
+                )
+
+            # Projection years: pull post-rebalance line-item values from simulation output.
+            for _, row in scenario_df.iterrows():
+                year = int(row.get('year', 0))
+                if year <= 0:
+                    continue
+                items_map = row.get('items', {})
+                total_nav = float(row.get('nav_total', 0.0) or 0.0)
+                if not isinstance(items_map, dict):
+                    continue
+                for item, metrics in items_map.items():
+                    nav_val = float(metrics.get('nav', 0.0) or 0.0)
+                    private_frac = float(metrics.get('private', 0.0) or 0.0)
+                    private_contribution = (nav_val * private_frac / total_nav) if total_nav > 0 else 0.0
+                    records.append(
+                        {
+                            'year': year,
+                            'item': str(item),
+                            'nav': nav_val,
+                            'private_pct_contribution': private_contribution,
+                        }
+                    )
+            return pd.DataFrame(records)
+
         # Scenario 1: V‑shaped recovery
         # Use reactive.calc instead of reactive.memoize (memoize is removed in recent Shiny versions).
         @reactive.calc
@@ -767,12 +813,25 @@ def build_server():
         @render_widget
         def v_nav_plot():
             df = v_scenario_results()
+            df_asset, _, _ = get_user_tables()
+            item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV',
-                hovertemplate='Year: %{x}<br>NAV: %{y:.2f}<extra>%{fullData.name}</extra>'
-            ))
-            fig.update_layout(title='NAV Growth (V-shaped)', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
+            if not item_df.empty:
+                for item in item_df['item'].drop_duplicates().tolist():
+                    sub = item_df[item_df['item'] == item]
+                    fig.add_trace(go.Bar(
+                        x=sub['year'],
+                        y=sub['nav'],
+                        name=item,
+                        hovertemplate='Year: %{x}<br>Item NAV: %{y:,.2f}<extra>%{fullData.name}</extra>',
+                    ))
+            fig.update_layout(
+                title='NAV Growth by Item (V-shaped)',
+                xaxis_title='Year',
+                yaxis_title='NAV',
+                barmode='stack',
+                template='plotly_white',
+            )
             return fig
 
         @render_widget
@@ -792,23 +851,49 @@ def build_server():
         @render_widget
         def v_private_plot():
             df = v_scenario_results()
+            df_asset, _, _ = get_user_tables()
+            item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['year'], y=df['private_total'], mode='lines+markers', name='Private',
-                hovertemplate='Year: %{x}<br>Private %: %{y:.2f}<extra>%{fullData.name}</extra>'
-            ))
-            fig.update_layout(title='Private Asset Path (V-shaped)', xaxis_title='Year', yaxis_title='Private %', template='plotly_white')
+            if not item_df.empty:
+                for item in item_df['item'].drop_duplicates().tolist():
+                    sub = item_df[item_df['item'] == item]
+                    fig.add_trace(go.Bar(
+                        x=sub['year'],
+                        y=sub['private_pct_contribution'],
+                        name=item,
+                        hovertemplate='Year: %{x}<br>Private contribution: %{y:.2%}<extra>%{fullData.name}</extra>',
+                    ))
+            fig.update_layout(
+                title='Private % by Item (V-shaped)',
+                xaxis_title='Year',
+                yaxis_title='Private %',
+                barmode='stack',
+                template='plotly_white',
+            )
             return fig
 
         @render_widget
         def u_nav_plot():
             df = u_scenario_results()
+            df_asset, _, _ = get_user_tables()
+            item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['year'], y=df['nav_total'], mode='lines+markers', name='NAV',
-                hovertemplate='Year: %{x}<br>NAV: %{y:.2f}<extra>%{fullData.name}</extra>'
-            ))
-            fig.update_layout(title='NAV Growth (U-shaped)', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
+            if not item_df.empty:
+                for item in item_df['item'].drop_duplicates().tolist():
+                    sub = item_df[item_df['item'] == item]
+                    fig.add_trace(go.Bar(
+                        x=sub['year'],
+                        y=sub['nav'],
+                        name=item,
+                        hovertemplate='Year: %{x}<br>Item NAV: %{y:,.2f}<extra>%{fullData.name}</extra>',
+                    ))
+            fig.update_layout(
+                title='NAV Growth by Item (U-shaped)',
+                xaxis_title='Year',
+                yaxis_title='NAV',
+                barmode='stack',
+                template='plotly_white',
+            )
             return fig
 
         @render_widget
@@ -828,12 +913,25 @@ def build_server():
         @render_widget
         def u_private_plot():
             df = u_scenario_results()
+            df_asset, _, _ = get_user_tables()
+            item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['year'], y=df['private_total'], mode='lines+markers', name='Private',
-                hovertemplate='Year: %{x}<br>Private %: %{y:.2f}<extra>%{fullData.name}</extra>'
-            ))
-            fig.update_layout(title='Private Asset Path (U-shaped)', xaxis_title='Year', yaxis_title='Private %', template='plotly_white')
+            if not item_df.empty:
+                for item in item_df['item'].drop_duplicates().tolist():
+                    sub = item_df[item_df['item'] == item]
+                    fig.add_trace(go.Bar(
+                        x=sub['year'],
+                        y=sub['private_pct_contribution'],
+                        name=item,
+                        hovertemplate='Year: %{x}<br>Private contribution: %{y:.2%}<extra>%{fullData.name}</extra>',
+                    ))
+            fig.update_layout(
+                title='Private % by Item (U-shaped)',
+                xaxis_title='Year',
+                yaxis_title='Private %',
+                barmode='stack',
+                template='plotly_white',
+            )
             return fig
 
         # Monte Carlo simulation event reactive
