@@ -111,6 +111,11 @@ def build_app_ui() -> ui.NavbarPage:
                         0.16,
                     ),
                     ui.input_numeric(
+                        "illiquidity_premium",
+                        "Illiquidity premium (decimal)",
+                        0.03,
+                    ),
+                    ui.input_numeric(
                         "n_years",
                         "Projection horizon (years)",
                         5,
@@ -180,18 +185,6 @@ def build_app_ui() -> ui.NavbarPage:
             ui.h3("Scenario outputs"),
             ui.accordion(
                 ui.accordion_panel(
-                    "V-shaped",
-                    ui.row(
-                        ui.column(6, ui.div(output_widget("v_market_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(output_widget("v_nav_plot"), class_="result-chart")),
-                    ),
-                    ui.row(
-                        ui.column(6, ui.div(output_widget("v_beta_plot"), class_="result-chart")),
-                        ui.column(6, ui.div(output_widget("v_private_plot"), class_="result-chart")),
-                    ),
-                    ui.input_action_button("show_v_table", "Show underlying data", class_="btn-outline-secondary"),
-                ),
-                ui.accordion_panel(
                     "U-shaped",
                     ui.row(
                         ui.column(6, ui.div(output_widget("u_market_plot"), class_="result-chart")),
@@ -204,6 +197,18 @@ def build_app_ui() -> ui.NavbarPage:
                     ui.input_action_button("show_u_table", "Show underlying data", class_="btn-outline-secondary"),
                 ),
                 ui.accordion_panel(
+                    "V-shaped",
+                    ui.row(
+                        ui.column(6, ui.div(output_widget("v_market_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("v_nav_plot"), class_="result-chart")),
+                    ),
+                    ui.row(
+                        ui.column(6, ui.div(output_widget("v_beta_plot"), class_="result-chart")),
+                        ui.column(6, ui.div(output_widget("v_private_plot"), class_="result-chart")),
+                    ),
+                    ui.input_action_button("show_v_table", "Show underlying data", class_="btn-outline-secondary"),
+                ),
+                ui.accordion_panel(
                     "Monte Carlo",
                     ui.row(
                         ui.column(6, ui.div(output_widget("mc_market_plot"), class_="result-chart")),
@@ -214,6 +219,7 @@ def build_app_ui() -> ui.NavbarPage:
                         ui.column(6, ui.div(output_widget("private_fan_plot"), class_="result-chart")),
                     ),
                 ),
+                multiple=False,
             ),
         ),
         title="Portfolio Stress Test",
@@ -551,6 +557,7 @@ def build_server():
             # Use baseline return and volatility from inputs
             br = float(input.baseline_return())
             bstd = float(input.baseline_std())
+            illiquidity_premium = float(input.illiquidity_premium())
             div_amt = float(input.dividend_amount())
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
@@ -563,6 +570,7 @@ def build_server():
                 cash_flows_df=df_cf,
                 baseline_return=br,
                 baseline_std=bstd,
+                illiquidity_premium=illiquidity_premium,
                 annual_dividend=div_amt,
                 dividend_is_percent=dividend_is_percent,
                 n_years=years,
@@ -613,6 +621,7 @@ def build_server():
             years = int(input.n_years())
             br = float(input.baseline_return())
             bstd = float(input.baseline_std())
+            illiquidity_premium = float(input.illiquidity_premium())
             div_amt = float(input.dividend_amount())
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
@@ -635,6 +644,7 @@ def build_server():
                 cash_flows_df=df_cf,
                 baseline_return=br,
                 baseline_std=bstd,
+                illiquidity_premium=illiquidity_premium,
                 annual_dividend=div_amt,
                 dividend_is_percent=dividend_is_percent,
                 n_years=years,
@@ -941,6 +951,7 @@ def build_server():
             years = int(input.n_years())
             br = float(input.baseline_return())
             bstd = float(input.baseline_std())
+            illiquidity_premium = float(input.illiquidity_premium())
             div_amt = float(input.dividend_amount())
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
@@ -954,6 +965,7 @@ def build_server():
                 cash_flows_df=df_cf,
                 baseline_return=br,
                 baseline_std=bstd,
+                illiquidity_premium=illiquidity_premium,
                 annual_dividend=div_amt,
                 dividend_is_percent=dividend_is_percent,
                 n_years=years,
