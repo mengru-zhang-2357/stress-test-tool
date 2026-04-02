@@ -373,8 +373,10 @@ def _apply_private_cash_flows(
         nav_after_cf = nav_after_return + call_amt * (1.0 + diff) - dist_amt * (1.0 + 2.0 * diff)
         # Compute net cash flow
         net_cf = call_amt * (1.0 + diff) - dist_amt * (1.0 + 2.0 * diff)
-        # Update the line item’s NAV directly
-        li.nav = nav_after_cf
+        # Update the line item’s NAV directly.
+        # Guard against negative NAVs; they can occur with extreme
+        # assumptions and would create unstable portfolio beta math.
+        li.nav = max(nav_after_cf, 0.0)
         # Move cash to/from the cash bucket
         # Positive net_cf indicates a call (cash out of the cash bucket)
         # Negative net_cf indicates distributions (cash added to the cash bucket)
@@ -413,6 +415,9 @@ def _apply_public_returns(
         # Apply return shock: Beta times market return
         shock_return = li.beta * market_return
         li.nav *= (1.0 + shock_return)
+        # Keep NAV non-negative.
+        if li.nav < 0:
+            li.nav = 0.0
 
 
 def _apply_dividend(
