@@ -138,3 +138,19 @@ def test_public_returns_clamp_negative_nav_to_zero():
 
     year_2_items = result.loc[result["year"] == 2, "items"].iloc[0]
     assert year_2_items["Hedge Overlay"]["nav"] == 0.0
+
+
+def test_rebalance_excludes_negative_beta_hedges():
+    items = _items(
+        LineItem("Cash", 0.0, 0.0, 1.0, 0.0),
+        LineItem("Hedge", 20.0, -0.5, 1.0, 0.0),
+        LineItem("LowBeta", 40.0, 0.3, 1.0, 0.0),
+        LineItem("HighBeta", 40.0, 1.0, 1.0, 0.0),
+    )
+
+    _rebalance_portfolio(items, beta_start=0.90, tolerance=0.01)
+
+    # Negative-beta hedge sleeve should be untouched by rebalancing.
+    assert math.isclose(items["Hedge"].nav, 20.0, abs_tol=1e-9)
+    _, beta_after, _ = _compute_portfolio_metrics(items)
+    assert math.isclose(beta_after, 0.90, abs_tol=0.01)

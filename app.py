@@ -23,6 +23,7 @@ import pandas as pd
 from shiny import App, ui, render, reactive
 from typing import Tuple, Iterable
 import plotly.graph_objects as go
+import plotly.express as px
 from shinywidgets import output_widget, render_widget
 
 from stress_simulation import simulate_portfolio, run_multiple_simulations
@@ -688,6 +689,8 @@ def build_server():
             return df
 
         def format_scenario_table(df: pd.DataFrame) -> pd.DataFrame:
+            table_raw = df.copy()
+            table_raw['portfolio_return'] = table_raw['nav_total_pre'] / table_raw['nav_total'].shift(1)
             display_names = {
                 'year': 'Year',
                 'nav_total_pre': 'NAV before dividend',
@@ -700,14 +703,17 @@ def build_server():
                 'private_post': 'Private % after dividend',
                 'private_total': 'Private % after rebalance',
                 'market_return': 'Market return',
+                'portfolio_return': 'Portfolio Return',
             }
-            table = df[list(display_names.keys())].copy().rename(columns=display_names)
+            table = table_raw[list(display_names.keys())].copy().rename(columns=display_names)
             nav_cols = ['NAV before dividend', 'NAV after dividend', 'NAV after rebalance']
             for col in nav_cols:
                 table[col] = table[col].map(lambda x: f"${float(x):,.2f}")
-            pct_cols = ['Private % before dividend', 'Private % after dividend', 'Private % after rebalance', 'Market return']
+            pct_cols = ['Private % before dividend', 'Private % after dividend', 'Private % after rebalance', 'Market return', 'Portfolio Return']
             for col in pct_cols:
-                table[col] = table[col].map(lambda x: f"{float(x) * 100:.2f}%")
+                table[col] = table[col].map(
+                    lambda x: "" if pd.isna(x) else f"{float(x) * 100:.2f}%"
+                )
             for col in ['Beta before dividend', 'Beta after dividend', 'Beta after rebalance']:
                 table[col] = table[col].map(lambda x: round(float(x), 3))
             table['Year'] = table['Year'].astype(int)
@@ -826,15 +832,28 @@ def build_server():
             df_asset, _, _ = get_user_tables()
             item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
+            vivid_colors = px.colors.qualitative.Vivid
             if not item_df.empty:
-                for item in item_df['item'].drop_duplicates().tolist():
+                for idx, item in enumerate(item_df['item'].drop_duplicates().tolist()):
                     sub = item_df[item_df['item'] == item]
                     fig.add_trace(go.Bar(
                         x=sub['year'],
                         y=sub['nav'],
                         name=item,
                         hovertemplate='Year: %{x}<br>Item NAV: %{y:,.2f}<extra>%{fullData.name}</extra>',
+                        marker_color=vivid_colors[idx % len(vivid_colors)],
                     ))
+                totals = item_df.groupby('year', as_index=False)['nav'].sum()
+                fig.add_trace(go.Scatter(
+                    x=totals['year'],
+                    y=totals['nav'],
+                    mode='text',
+                    text=[f"{x:,.0f}" for x in totals['nav']],
+                    textposition='top center',
+                    textfont=dict(color='black'),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ))
             fig.update_layout(
                 title='NAV Growth by Item (V-shaped)',
                 xaxis_title='Year',
@@ -864,15 +883,28 @@ def build_server():
             df_asset, _, _ = get_user_tables()
             item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
+            vivid_colors = px.colors.qualitative.Vivid
             if not item_df.empty:
-                for item in item_df['item'].drop_duplicates().tolist():
+                for idx, item in enumerate(item_df['item'].drop_duplicates().tolist()):
                     sub = item_df[item_df['item'] == item]
                     fig.add_trace(go.Bar(
                         x=sub['year'],
                         y=sub['private_pct_contribution'],
                         name=item,
                         hovertemplate='Year: %{x}<br>Private contribution: %{y:.2%}<extra>%{fullData.name}</extra>',
+                        marker_color=vivid_colors[idx % len(vivid_colors)],
                     ))
+                totals = item_df.groupby('year', as_index=False)['private_pct_contribution'].sum()
+                fig.add_trace(go.Scatter(
+                    x=totals['year'],
+                    y=totals['private_pct_contribution'],
+                    mode='text',
+                    text=[f"{x:.1%}" for x in totals['private_pct_contribution']],
+                    textposition='top center',
+                    textfont=dict(color='black'),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ))
             fig.update_layout(
                 title='Private % by Item (V-shaped)',
                 xaxis_title='Year',
@@ -888,15 +920,28 @@ def build_server():
             df_asset, _, _ = get_user_tables()
             item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
+            vivid_colors = px.colors.qualitative.Vivid
             if not item_df.empty:
-                for item in item_df['item'].drop_duplicates().tolist():
+                for idx, item in enumerate(item_df['item'].drop_duplicates().tolist()):
                     sub = item_df[item_df['item'] == item]
                     fig.add_trace(go.Bar(
                         x=sub['year'],
                         y=sub['nav'],
                         name=item,
                         hovertemplate='Year: %{x}<br>Item NAV: %{y:,.2f}<extra>%{fullData.name}</extra>',
+                        marker_color=vivid_colors[idx % len(vivid_colors)],
                     ))
+                totals = item_df.groupby('year', as_index=False)['nav'].sum()
+                fig.add_trace(go.Scatter(
+                    x=totals['year'],
+                    y=totals['nav'],
+                    mode='text',
+                    text=[f"{x:,.0f}" for x in totals['nav']],
+                    textposition='top center',
+                    textfont=dict(color='black'),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ))
             fig.update_layout(
                 title='NAV Growth by Item (U-shaped)',
                 xaxis_title='Year',
@@ -926,15 +971,28 @@ def build_server():
             df_asset, _, _ = get_user_tables()
             item_df = build_item_allocation_frame(df, df_asset)
             fig = go.Figure()
+            vivid_colors = px.colors.qualitative.Vivid
             if not item_df.empty:
-                for item in item_df['item'].drop_duplicates().tolist():
+                for idx, item in enumerate(item_df['item'].drop_duplicates().tolist()):
                     sub = item_df[item_df['item'] == item]
                     fig.add_trace(go.Bar(
                         x=sub['year'],
                         y=sub['private_pct_contribution'],
                         name=item,
                         hovertemplate='Year: %{x}<br>Private contribution: %{y:.2%}<extra>%{fullData.name}</extra>',
+                        marker_color=vivid_colors[idx % len(vivid_colors)],
                     ))
+                totals = item_df.groupby('year', as_index=False)['private_pct_contribution'].sum()
+                fig.add_trace(go.Scatter(
+                    x=totals['year'],
+                    y=totals['private_pct_contribution'],
+                    mode='text',
+                    text=[f"{x:.1%}" for x in totals['private_pct_contribution']],
+                    textposition='top center',
+                    textfont=dict(color='black'),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ))
             fig.update_layout(
                 title='Private % by Item (U-shaped)',
                 xaxis_title='Year',
