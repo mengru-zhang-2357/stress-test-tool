@@ -318,6 +318,7 @@ def _apply_private_cash_flows(
     cash_flows: Dict[str, Dict[int, Tuple[float, float]]],
     year: int,
     baseline_return: float,
+    illiquidity_premium: float,
     market_return: float,
     cash_item_name: str,
 ) -> None:
@@ -335,6 +336,7 @@ def _apply_private_cash_flows(
         cash_flows: Nested dictionary of cash flow fractions by item and year.
         year: Current projection year.
         baseline_return: Baseline return assumption (e.g. 0.08).
+        illiquidity_premium: Additional return premium for private assets.
         market_return: The equity market return for this year (e.g. –0.40 for
             year 1 shock or a normal draw for subsequent years).
         cash_item_name: Name of the cash/fixed income bucket.
@@ -366,7 +368,7 @@ def _apply_private_cash_flows(
         shock_return = li.beta * market_return
         # Diff is item-specific: baseline return minus this item's applied shock return.
         diff = baseline_return - shock_return
-        nav_after_return = starting_nav * (1.0 + 0.6 * shock_return)
+        nav_after_return = starting_nav * (1.0 + 0.6 * shock_return + illiquidity_premium)
         # Adjust for calls and distributions
         nav_after_cf = nav_after_return + call_amt * (1.0 + diff) - dist_amt * (1.0 + 2.0 * diff)
         # Compute net cash flow
@@ -559,6 +561,7 @@ def simulate_portfolio(
     cash_flows_df: pd.DataFrame,
     baseline_return: float = 0.08,
     baseline_std: float = 0.16,
+    illiquidity_premium: float = 0.03,
     annual_dividend: float = 0.0,
     dividend_is_percent: bool = False,
     n_years: int = 10,
@@ -585,6 +588,8 @@ def simulate_portfolio(
             flow formula (e.g. 0.08 for 8 %).  Default 0.08.
         baseline_std: Baseline standard deviation (unused directly but
             provided for completeness).  Default 0.16.
+        illiquidity_premium: Additional premium applied to private return
+            calculations. Default 0.03.
         annual_dividend: Annual dividend amount.  If ``dividend_is_percent``
             is False, the value is treated as a fixed dollar amount.  If
             True, it is interpreted as a fraction of the pre‑dividend
@@ -656,6 +661,7 @@ def simulate_portfolio(
             cash_flows,
             year,
             baseline_return,
+            illiquidity_premium,
             mr,
             cash_item_name,
         )
@@ -720,6 +726,7 @@ def run_multiple_simulations(
     cash_flows_df: pd.DataFrame,
     baseline_return: float = 0.08,
     baseline_std: float = 0.16,
+    illiquidity_premium: float = 0.03,
     annual_dividend: float = 0.0,
     dividend_is_percent: bool = False,
     n_years: int = 10,
@@ -736,6 +743,7 @@ def run_multiple_simulations(
         cash_flows_df: Cash flow projection DataFrame.
         baseline_return: Baseline return for private flow adjustments.
         baseline_std: Baseline standard deviation (unused directly).
+        illiquidity_premium: Additional premium used in private return logic.
         annual_dividend: Dividend amount or fraction.
         dividend_is_percent: Whether the dividend is a percentage of NAV.
         n_years: Number of projection years (including year 1 shock).
@@ -761,6 +769,7 @@ def run_multiple_simulations(
             cash_flows_df=cash_flows_df,
             baseline_return=baseline_return,
             baseline_std=baseline_std,
+            illiquidity_premium=illiquidity_premium,
             annual_dividend=annual_dividend,
             dividend_is_percent=dividend_is_percent,
             n_years=n_years,
