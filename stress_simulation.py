@@ -503,16 +503,23 @@ def _rebalance_portfolio(
             return
 
         moved_any = False
-        non_cash_items = [li for li in items.values() if li.name != 'Cash' and li.nav > 0]
-        if not non_cash_items:
+        # Exclude negative-beta assets from rebalancing; they are treated as
+        # hedge sleeves and cannot be bought/sold for beta targeting.
+        rebalance_items = [
+            li for li in items.values() if li.name != 'Cash' and li.nav > 0 and li.beta >= 0
+        ]
+        if not rebalance_items:
             return
 
         if diff > 0:
             # Increase beta: move liquid dollars from lower-beta sources to
             # the highest-beta destination.
-            dst = max(non_cash_items, key=lambda li: li.beta)
+            dst = max(rebalance_items, key=lambda li: li.beta)
             sources = sorted(
-                [li for li in items.values() if li is not dst and li.nav > 0 and li.liquid_amount() > 0],
+                [
+                    li for li in rebalance_items
+                    if li is not dst and li.liquid_amount() > 0
+                ],
                 key=lambda li: li.beta,
             )
             needed_beta_gap = diff
@@ -531,14 +538,16 @@ def _rebalance_portfolio(
         else:
             # Decrease beta: move from higher-beta sources to a low-beta sink.
             sink = items.get('Cash')
+            if sink is not None and sink.beta < 0:
+                sink = None
             if sink is None:
-                sink_candidates = [li for li in items.values() if li.nav >= 0]
+                sink_candidates = [li for li in rebalance_items if li.nav >= 0]
                 if not sink_candidates:
                     return
                 sink = min(sink_candidates, key=lambda li: li.beta)
             needed_beta_gap = -diff
             sources = sorted(
-                [li for li in non_cash_items if li is not sink and li.liquid_amount() > 0],
+                [li for li in rebalance_items if li is not sink and li.liquid_amount() > 0],
                 key=lambda li: li.beta,
                 reverse=True,
             )
