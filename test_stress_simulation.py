@@ -101,3 +101,40 @@ def test_illiquidity_premium_is_applied_to_private_return_path():
     # Year-1 market return is fixed at -40%; formula should be:
     # 100 * (1 + 0.6 * -0.4 + 0.03) = 79
     assert math.isclose(float(result.loc[0, "nav_total_pre"]), 79.0, abs_tol=1e-9)
+
+
+def test_public_returns_clamp_negative_nav_to_zero():
+    asset_alloc_df = pd.DataFrame(
+        [
+            {
+                "Item": "Hedge Overlay",
+                "Allocation": 100.0,
+                "Beta": -5.0,
+                "Monthly Liquidity %": 1.0,
+                "Private %": 0.0,
+            },
+            {
+                "Item": "Cash",
+                "Allocation": 0.0,
+                "Beta": 0.0,
+                "Monthly Liquidity %": 1.0,
+                "Private %": 0.0,
+            },
+        ]
+    )
+    liquidity_df = pd.DataFrame([{"Item": "Cash", "Liquidity Order": 1}])
+    cash_flows_df = pd.DataFrame(columns=["Item", "Projection Year", "Capital Call %", "Distribution %"])
+
+    # Year 2 market return of +30% would drive the -5 beta sleeve to
+    # 100 * (1 - 1.5) = -50 without clamping.
+    result = simulate_portfolio(
+        asset_alloc_df=asset_alloc_df,
+        liquidity_df=liquidity_df,
+        cash_flows_df=cash_flows_df,
+        annual_dividend=0.0,
+        n_years=2,
+        scenario_returns={2: 0.30},
+    )
+
+    year_2_items = result.loc[result["year"] == 2, "items"].iloc[0]
+    assert year_2_items["Hedge Overlay"]["nav"] == 0.0
