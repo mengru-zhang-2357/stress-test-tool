@@ -292,6 +292,7 @@ def _initialize_cash_flows(cash_flows_df: pd.DataFrame) -> Dict[str, Dict[int, T
         if name not in flows:
             flows[name] = {}
         flows[name][year] = (call_pct, dist_pct)
+    print(flows)
     return flows
 
 
@@ -367,7 +368,7 @@ def _apply_private_cash_flows(
         # Apply return shock to NAV (beta * market_return) for this item
         shock_return = li.beta * market_return
         # Diff is item-specific: baseline return minus this item's applied shock return.
-        diff = baseline_return - shock_return
+        diff = baseline_return + shock_return
         nav_after_return = starting_nav * (1.0 + 0.6 * shock_return + illiquidity_premium)
         # Adjust for calls and distributions
         nav_after_cf = nav_after_return + call_amt * (1.0 + diff) - dist_amt * (1.0 + 2.0 * diff)
