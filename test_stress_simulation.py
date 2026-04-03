@@ -17,7 +17,9 @@ def test_rebalance_beta_increase_avoids_overshoot_with_high_beta_destination():
         LineItem("LeveredEquity", 40.0, 1.5, 1.0, 0.0),
     )
 
-    _rebalance_portfolio(items, beta_start=0.90, tolerance=0.02)
+    _rebalance_portfolio(
+        items, beta_start=0.90, liquidity_order=["Cash", "Bonds", "LeveredEquity"], tolerance=0.02
+    )
 
     _, beta_after, _ = _compute_portfolio_metrics(items)
     assert beta_after <= 0.92
@@ -31,7 +33,12 @@ def test_rebalance_beta_increase_handles_narrow_beta_spread_without_undershoot()
         LineItem("SlightlyHigherBeta", 50.0, 0.63, 1.0, 0.0),
     )
 
-    _rebalance_portfolio(items, beta_start=0.62, tolerance=0.005)
+    _rebalance_portfolio(
+        items,
+        beta_start=0.62,
+        liquidity_order=["Cash", "LowBeta", "SlightlyHigherBeta"],
+        tolerance=0.005,
+    )
 
     _, beta_after, _ = _compute_portfolio_metrics(items)
     assert math.isclose(beta_after, 0.62, abs_tol=0.005)
@@ -45,7 +52,12 @@ def test_rebalance_converges_within_tolerance_when_liquidity_is_sufficient():
         LineItem("LowBeta", 10.0, 0.1, 1.0, 0.0),
     )
 
-    _rebalance_portfolio(items, beta_start=0.70, tolerance=0.01)
+    _rebalance_portfolio(
+        items,
+        beta_start=0.70,
+        liquidity_order=["Cash", "LowBeta", "HighBeta2", "HighBeta1"],
+        tolerance=0.01,
+    )
 
     _, beta_after, _ = _compute_portfolio_metrics(items)
     assert math.isclose(beta_after, 0.70, abs_tol=0.01)
@@ -60,7 +72,12 @@ def test_rebalance_stops_gracefully_when_liquidity_is_insufficient():
     )
 
     _, beta_before, _ = _compute_portfolio_metrics(items)
-    _rebalance_portfolio(items, beta_start=0.80, tolerance=0.01)
+    _rebalance_portfolio(
+        items,
+        beta_start=0.80,
+        liquidity_order=["Cash", "SmallLiquidLow", "IlliquidLow", "HighBeta"],
+        tolerance=0.01,
+    )
     _, beta_after, _ = _compute_portfolio_metrics(items)
 
     # Beta should improve, but remain outside tolerance because available
@@ -148,9 +165,38 @@ def test_rebalance_excludes_negative_beta_hedges():
         LineItem("HighBeta", 40.0, 1.0, 1.0, 0.0),
     )
 
-    _rebalance_portfolio(items, beta_start=0.90, tolerance=0.01)
+    _rebalance_portfolio(
+        items,
+        beta_start=0.90,
+        liquidity_order=["Cash", "Hedge", "LowBeta", "HighBeta"],
+        tolerance=0.01,
+    )
 
     # Negative-beta hedge sleeve should be untouched by rebalancing.
     assert math.isclose(items["Hedge"].nav, 20.0, abs_tol=1e-9)
     _, beta_after, _ = _compute_portfolio_metrics(items)
     assert math.isclose(beta_after, 0.90, abs_tol=0.01)
+
+
+def test_rebalance_uses_only_waterfall_items_and_excludes_mep_hedge():
+    items = _items(
+        LineItem("Cash", 10.0, 0.0, 1.0, 0.0),
+        LineItem("Treasuries", 40.0, 0.1, 1.0, 0.0),
+        LineItem("Public Equity", 40.0, 1.0, 1.0, 0.0),
+        LineItem("PE", 40.0, 1.3, 1.0, 0.0),
+        LineItem("MEP Hedge", 20.0, 0.4, 1.0, 0.0),
+    )
+    pe_nav_before = items["PE"].nav
+    hedge_nav_before = items["MEP Hedge"].nav
+
+    _rebalance_portfolio(
+        items,
+        beta_start=0.80,
+        liquidity_order=["Cash", "Treasuries", "Public Equity", "MEP Hedge"],
+        tolerance=0.005,
+    )
+
+    # PE is not in the liquidity waterfall, so it should not move.
+    assert math.isclose(items["PE"].nav, pe_nav_before, abs_tol=1e-9)
+    # MEP Hedge is explicitly excluded from rebalancing.
+    assert math.isclose(items["MEP Hedge"].nav, hedge_nav_before, abs_tol=1e-9)
