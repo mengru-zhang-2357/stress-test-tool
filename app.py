@@ -523,9 +523,9 @@ def build_server():
                         'year': 0,
                         'item': item,
                         'nav_before_dividend': nav_val,
-                        'nav_after_dividend': nav_val,
-                        'nav_after_rebalance': nav_val,
-                        'nav': nav_val,
+                        # Year 0 is a starting snapshot (no dividend/rebalance step yet).
+                        'nav_after_dividend': None,
+                        'nav_after_rebalance': None,
                         'private_pct_contribution': private_contribution,
                     }
                 )
@@ -552,7 +552,6 @@ def build_server():
                             'nav_before_dividend': nav_pre,
                             'nav_after_dividend': nav_post,
                             'nav_after_rebalance': nav_rb,
-                            'nav': nav_rb,
                             'private_pct_contribution': private_contribution,
                         }
                     )
