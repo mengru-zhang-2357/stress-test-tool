@@ -711,21 +711,32 @@ def simulate_portfolio(
                 dividend_amt = annual_dividend
         else:
             dividend_amt = 0.0
+        # Record results
+        # Capture per-item metrics at each annual phase:
+        # - nav_pre: after market/public/private return updates, before dividend
+        # - nav_post: after dividend, before rebalancing
+        # - nav_rebalanced/nav: after rebalancing (final year-end value)
+        item_metrics_pre = {name: li.nav for name, li in items.items()}
         # Apply dividend using liquidity waterfall
         _apply_dividend(items, liquidity_order, dividend_amt)
+        item_metrics_post = {name: li.nav for name, li in items.items()}
         # Compute metrics after dividend, before rebalancing
         total_nav_post, beta_post, private_post = _compute_portfolio_metrics(items)
         monthly_liq_post = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_post if total_nav_post > 0 else 0.0
         # Rebalance if beta deviates
         _rebalance_portfolio(items, beta_start, liquidity_order, tolerance=0.02)
+        item_metrics_rb = {name: li.nav for name, li in items.items()}
         # Compute metrics after rebalancing
         total_nav_rb, beta_rb, private_rb = _compute_portfolio_metrics(items)
         monthly_liq_rb = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_rb if total_nav_rb > 0 else 0.0
-        # Record results
-        # Capture per‑item metrics (NAV, beta, monthly liquidity fraction, private fraction)
+        # Capture per-item metrics (NAV, beta, monthly liquidity fraction, private fraction)
         item_metrics = {
             name: {
-                'nav': li.nav,
+                'nav_pre': item_metrics_pre.get(name, 0.0),
+                'nav_post': item_metrics_post.get(name, 0.0),
+                'nav_rebalanced': item_metrics_rb.get(name, 0.0),
+                # Backwards-compatible alias used by UI charts/tables.
+                'nav': item_metrics_rb.get(name, 0.0),
                 'beta': li.beta,
                 'monthly_liq': li.monthly_liq,
                 'private': li.private,
