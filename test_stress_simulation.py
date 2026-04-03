@@ -157,6 +157,38 @@ def test_public_returns_clamp_negative_nav_to_zero():
     assert year_2_items["Hedge Overlay"]["nav"] == 0.0
 
 
+def test_items_include_pre_post_and_rebalanced_nav_snapshots():
+    asset_alloc_df = pd.DataFrame(
+        [
+            {"Item": "Cash", "Allocation": 20.0, "Beta": 0.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+            {"Item": "Public Equity", "Allocation": 80.0, "Beta": 1.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+        ]
+    )
+    liquidity_df = pd.DataFrame(
+        [
+            {"Item": "Cash", "Liquidity Order": 1},
+            {"Item": "Public Equity", "Liquidity Order": 2},
+        ]
+    )
+    cash_flows_df = pd.DataFrame(columns=["Item", "Projection Year", "Capital Call %", "Distribution %"])
+
+    result = simulate_portfolio(
+        asset_alloc_df=asset_alloc_df,
+        liquidity_df=liquidity_df,
+        cash_flows_df=cash_flows_df,
+        annual_dividend=10.0,
+        n_years=1,
+    )
+
+    items = result.loc[result["year"] == 1, "items"].iloc[0]
+    for item_metrics in items.values():
+        assert "nav_pre" in item_metrics
+        assert "nav_post" in item_metrics
+        assert "nav_rebalanced" in item_metrics
+        assert "nav" in item_metrics
+        assert item_metrics["nav"] == item_metrics["nav_rebalanced"]
+
+
 def test_rebalance_excludes_negative_beta_hedges():
     items = _items(
         LineItem("Cash", 0.0, 0.0, 1.0, 0.0),

@@ -505,7 +505,7 @@ def build_server():
             return div_amt
 
         def build_item_allocation_frame(scenario_df: pd.DataFrame, df_asset: pd.DataFrame) -> pd.DataFrame:
-            """Build per-year, per-item post-rebalance NAV and private-contribution data."""
+            """Build per-year, per-item NAV snapshots and private-contribution data."""
             records = []
             # Year 0 baseline: use starting allocations directly.
             year0_nav = float(df_asset['Allocation'].sum()) if not df_asset.empty else 0.0
@@ -522,6 +522,10 @@ def build_server():
                     {
                         'year': 0,
                         'item': item,
+                        'nav_before_dividend': nav_val,
+                        # Year 0 is a starting snapshot (no dividend/rebalance step yet).
+                        'nav_after_dividend': None,
+                        'nav_after_rebalance': None,
                         'nav': nav_val,
                         'private_pct_contribution': private_contribution,
                     }
@@ -537,14 +541,19 @@ def build_server():
                 if not isinstance(items_map, dict):
                     continue
                 for item, metrics in items_map.items():
-                    nav_val = float(metrics.get('nav', 0.0) or 0.0)
+                    nav_pre = float(metrics.get('nav_pre', metrics.get('nav', 0.0)) or 0.0)
+                    nav_post = float(metrics.get('nav_post', metrics.get('nav', 0.0)) or 0.0)
+                    nav_rb = float(metrics.get('nav_rebalanced', metrics.get('nav', 0.0)) or 0.0)
                     private_frac = float(metrics.get('private', 0.0) or 0.0)
-                    private_contribution = (nav_val * private_frac / total_nav) if total_nav > 0 else 0.0
+                    private_contribution = (nav_rb * private_frac / total_nav) if total_nav > 0 else 0.0
                     records.append(
                         {
                             'year': year,
                             'item': str(item),
-                            'nav': nav_val,
+                            'nav_before_dividend': nav_pre,
+                            'nav_after_dividend': nav_post,
+                            'nav_after_rebalance': nav_rb,
+                            'nav': nav_rb,
                             'private_pct_contribution': private_contribution,
                         }
                     )
