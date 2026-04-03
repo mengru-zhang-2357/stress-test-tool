@@ -228,10 +228,10 @@ def _initialize_liquidity_order(
 
     The liquidity DataFrame must have columns ``Item`` and ``Liquidity Order``.
     Items may appear in the DataFrame even if they are not present in the
-    asset allocation DataFrame; such items are ignored.  Any item in the
-    asset allocation but missing from the liquidity DataFrame will be
-    appended to the end of the order with a high order number.  Cash is
-    always placed at the start of the order if not already specified.
+    asset allocation DataFrame; such items are ignored.  Rows with missing
+    ``Liquidity Order`` are also ignored so only explicitly ordered items
+    participate in the waterfall.  Cash is always placed at the start of
+    the order if not already specified.
 
     Args:
         liquidity_df: DataFrame containing the liquidity waterfall.
@@ -241,29 +241,28 @@ def _initialize_liquidity_order(
         List of item names ordered from most liquid (highest priority) to
         least.
     """
-    order = []
-    # Filter only valid items present in our portfolio
+    order: List[Tuple[str, float]] = []
+    seen_names = set()
+    # Filter only valid items present in our portfolio with an explicit order.
     for _, row in liquidity_df.iterrows():
         name = str(row['Item']).strip()
-        if name in items:
-            order_rank = row.get('Liquidity Order', None)
-            try:
-                order_rank = float(order_rank)
-            except Exception:
-                order_rank = None
-            order.append((name, order_rank))
-    # Add remaining items not specified.  They will have None order and
-    # will be sorted at the end by name.
-    for name in items.keys():
-        if name not in [n for n, _ in order]:
-            order.append((name, None))
-    # Ensure cash bucket is first in order.  If 'Cash' exists and not
-    # already first, insert it at the beginning.
-    order_names = [n for n, _ in order]
-    if 'Cash' in items and 'Cash' not in order_names:
-        order.insert(0, ('Cash', -math.inf))
-    # Sort primarily by Liquidity Order (ascending) then by name
-    order_sorted = sorted(order, key=lambda x: (math.inf if x[1] is None else x[1], x[0]))
+        if name not in items or name in seen_names:
+            continue
+        order_rank = row.get('Liquidity Order', None)
+        try:
+            order_rank = float(order_rank)
+        except Exception:
+            continue
+        if pd.isna(order_rank):
+            continue
+        order.append((name, order_rank))
+        seen_names.add(name)
+    # Ensure cash bucket is first in order.  If 'Cash' exists and is not
+    # explicitly ordered, insert it at the beginning.
+    if 'Cash' in items and 'Cash' not in seen_names:
+        order.append(('Cash', -math.inf))
+    # Sort primarily by Liquidity Order (ascending) then by name.
+    order_sorted = sorted(order, key=lambda x: (x[1], x[0]))
     return [name for name, _ in order_sorted]
 
 
