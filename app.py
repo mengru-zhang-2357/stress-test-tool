@@ -739,7 +739,7 @@ def build_server():
 
         def format_scenario_table(df: pd.DataFrame) -> pd.DataFrame:
             table_raw = df.copy()
-            table_raw['portfolio_return'] = table_raw['nav_total_pre'] / table_raw['nav_total'].shift(1)
+            table_raw['portfolio_return'] = table_raw['nav_total_pre'] / table_raw['nav_total'].shift(1) - 1
             display_names = {
                 'year': 'Year',
                 'nav_total_pre': 'NAV before dividend',
