@@ -474,7 +474,10 @@ def _apply_dividend(
 
 
 def _rebalance_portfolio(
-    items: Dict[str, LineItem], beta_start: float, tolerance: float = 0.02
+    items: Dict[str, LineItem],
+    beta_start: float,
+    liquidity_order: List[str],
+    tolerance: float = 0.02,
 ) -> None:
     """Rebalance the portfolio if the beta deviates beyond a tolerance.
 
@@ -488,83 +491,91 @@ def _rebalance_portfolio(
     Args:
         items: Mapping of line items.
         beta_start: The starting portfolio beta.
+        liquidity_order: Liquidity waterfall order; only these items are
+            eligible for rebalancing.
         tolerance: The maximum allowed deviation from ``beta_start``.  If
             the current beta lies outside ``beta_start ± tolerance``, the
             function rebalances to exactly ``beta_start``.
     """
     max_iters = 1_000
     min_effect = 1e-12
+    excluded_name = "mep hedge"
+    # Only assets explicitly present in the liquidity waterfall can
+    # participate in rebalancing.
+    waterfall_names = [name for name in liquidity_order if name in items]
+    order_index = {name: idx for idx, name in enumerate(waterfall_names)}
+
+    def _eligible(li: LineItem) -> bool:
+        return li.name in order_index and li.name.lower() != excluded_name
+
+    def _pick_source_and_destination(risk_to_add: float) -> Tuple[Optional[LineItem], Optional[LineItem]]:
+        participants = [li for li in items.values() if _eligible(li)]
+        if len(participants) < 2:
+            return None, None
+        if risk_to_add > 0:
+            # Need to increase beta: sell low-beta liquid source, buy high-beta destination.
+            source_candidates = [li for li in participants if li.liquid_amount() > min_effect]
+            if not source_candidates:
+                return None, None
+            src = min(source_candidates, key=lambda li: (order_index[li.name], li.beta))
+            dst = max(
+                [li for li in participants if li is not src],
+                key=lambda li: (-order_index[li.name], li.beta),
+                default=None,
+            )
+            return src, dst
+        # Need to decrease beta: sell high-beta liquid source, buy low-beta destination.
+        source_candidates = [li for li in participants if li.liquid_amount() > min_effect]
+        if not source_candidates:
+            return None, None
+        src = max(source_candidates, key=lambda li: (-order_index[li.name], li.beta))
+        dst = min(
+            [li for li in participants if li is not src],
+            key=lambda li: (order_index[li.name], li.beta),
+            default=None,
+        )
+        return src, dst
+
     for _ in range(max_iters):
         total_nav, beta_current, _ = _compute_portfolio_metrics(items)
         if total_nav <= 0:
             return
-        diff = beta_start - beta_current
-        if abs(diff) <= tolerance:
+        beta_diff = beta_start - beta_current
+        if abs(beta_diff) <= tolerance:
+            return
+        risk_to_add = beta_diff * total_nav
+        src, dst = _pick_source_and_destination(risk_to_add)
+        if src is None or dst is None:
+            return
+        per_dollar_risk = dst.beta - src.beta
+        if abs(per_dollar_risk) <= min_effect:
+            return
+        if risk_to_add * per_dollar_risk <= 0:
             return
 
-        moved_any = False
-        # Exclude negative-beta assets from rebalancing; they are treated as
-        # hedge sleeves and cannot be bought/sold for beta targeting.
-        rebalance_items = [
-            li for li in items.values() if li.name != 'Cash' and li.nav > 0 and li.beta >= 0
-        ]
-        if not rebalance_items:
+        available_step = 0.5 * src.liquid_amount()
+        if available_step <= min_effect:
             return
 
-        if diff > 0:
-            # Increase beta: move liquid dollars from lower-beta sources to
-            # the highest-beta destination.
-            dst = max(rebalance_items, key=lambda li: li.beta)
-            sources = sorted(
-                [
-                    li for li in rebalance_items
-                    if li is not dst and li.liquid_amount() > 0
-                ],
-                key=lambda li: li.beta,
-            )
-            needed_beta_gap = diff
-            for src in sources:
-                per_dollar_lift = (dst.beta - src.beta) / total_nav
-                if per_dollar_lift <= min_effect:
-                    continue
-                available = src.liquid_amount()
-                transfer_amount = min(available, needed_beta_gap / per_dollar_lift)
-                if transfer_amount <= 0:
-                    continue
-                src.update_after_sale(transfer_amount)
-                dst.add_investment(transfer_amount, liquid=True)
-                moved_any = True
-                break
-        else:
-            # Decrease beta: move from higher-beta sources to a low-beta sink.
-            sink = items.get('Cash')
-            if sink is not None and sink.beta < 0:
-                sink = None
-            if sink is None:
-                sink_candidates = [li for li in rebalance_items if li.nav >= 0]
-                if not sink_candidates:
-                    return
-                sink = min(sink_candidates, key=lambda li: li.beta)
-            needed_beta_gap = -diff
-            sources = sorted(
-                [li for li in rebalance_items if li is not sink and li.liquid_amount() > 0],
-                key=lambda li: li.beta,
-                reverse=True,
-            )
-            for src in sources:
-                per_dollar_reduction = (src.beta - sink.beta) / total_nav
-                if per_dollar_reduction <= min_effect:
-                    continue
-                available = src.liquid_amount()
-                transfer_amount = min(available, needed_beta_gap / per_dollar_reduction)
-                if transfer_amount <= 0:
-                    continue
-                src.update_after_sale(transfer_amount)
-                sink.add_investment(transfer_amount, liquid=True)
-                moved_any = True
-                break
+        prev_beta_diff = beta_diff
+        src.update_after_sale(available_step)
+        dst.add_investment(available_step, liquid=True)
 
-        if not moved_any:
+        _, beta_after_step, _ = _compute_portfolio_metrics(items)
+        new_beta_diff = beta_start - beta_after_step
+        crossed_target = (prev_beta_diff > 0 > new_beta_diff) or (prev_beta_diff < 0 < new_beta_diff)
+        if abs(new_beta_diff) <= tolerance:
+            return
+        if crossed_target:
+            # Undo half-step and apply the exact amount needed to hit target.
+            dst.update_after_sale(available_step)
+            src.add_investment(available_step, liquid=True)
+            required_amount = abs(prev_beta_diff * total_nav / per_dollar_risk)
+            required_amount = min(required_amount, src.liquid_amount())
+            if required_amount <= min_effect:
+                return
+            src.update_after_sale(required_amount)
+            dst.add_investment(required_amount, liquid=True)
             return
     return
 
@@ -696,7 +707,7 @@ def simulate_portfolio(
         total_nav_post, beta_post, private_post = _compute_portfolio_metrics(items)
         monthly_liq_post = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_post if total_nav_post > 0 else 0.0
         # Rebalance if beta deviates
-        _rebalance_portfolio(items, beta_start, tolerance=0.02)
+        _rebalance_portfolio(items, beta_start, liquidity_order, tolerance=0.02)
         # Compute metrics after rebalancing
         total_nav_rb, beta_rb, private_rb = _compute_portfolio_metrics(items)
         monthly_liq_rb = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_rb if total_nav_rb > 0 else 0.0
