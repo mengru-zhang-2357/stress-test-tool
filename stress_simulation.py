@@ -508,33 +508,54 @@ def _rebalance_portfolio(
     def _eligible(li: LineItem) -> bool:
         return li.name in order_index and li.name.lower() != excluded_name
 
-    def _pick_source_and_destination(risk_to_add: float) -> Tuple[Optional[LineItem], Optional[LineItem]]:
+    def _pick_source_and_destination(
+        risk_to_add: float,
+        blocked_sources: Optional[set[str]] = None,
+        blocked_destinations: Optional[set[str]] = None,
+    ) -> Tuple[Optional[LineItem], Optional[LineItem]]:
+        blocked_sources = blocked_sources or set()
+        blocked_destinations = blocked_destinations or set()
         participants = [li for li in items.values() if _eligible(li)]
         if len(participants) < 2:
             return None, None
-        source_candidates = [li for li in participants if li.liquid_amount() > min_effect]
+        source_candidates = [
+            li for li in participants if li.name not in blocked_sources and li.liquid_amount() > min_effect
+        ]
         if not source_candidates:
             return None, None
         if risk_to_add > 0:
             # Need to increase beta: sell the lowest-beta liquid source
             # (tie-breaker: earlier liquidity order), buy the highest-beta
             # destination from remaining participants.
-            src = min(source_candidates, key=lambda li: (li.beta, order_index[li.name]))
-            dst_candidates = [li for li in participants if li is not src and li.beta > src.beta]
-            if not dst_candidates:
-                return None, None
-            # Tie-breaker on destination prefers later liquidity order.
-            dst = max(dst_candidates, key=lambda li: (li.beta, order_index[li.name]))
-            return src, dst
+            sorted_sources = sorted(source_candidates, key=lambda li: (li.beta, order_index[li.name]))
+            for src in sorted_sources:
+                dst_candidates = [
+                    li
+                    for li in participants
+                    if li is not src
+                    and li.name not in blocked_destinations
+                    and li.beta > src.beta
+                    and li.liquid_amount() > min_effect
+                ]
+                if not dst_candidates:
+                    continue
+                # Tie-breaker on destination prefers later liquidity order.
+                dst = max(dst_candidates, key=lambda li: (li.beta, order_index[li.name]))
+                return src, dst
+            return None, None
         # Need to decrease beta: sell the highest-beta liquid source
         # (tie-breaker: earlier liquidity order), buy the lowest-beta
         # destination from remaining participants.
-        src = max(source_candidates, key=lambda li: (li.beta, -order_index[li.name]))
-        dst_candidates = [li for li in participants if li is not src and li.beta < src.beta]
-        if not dst_candidates:
-            return None, None
-        dst = min(dst_candidates, key=lambda li: (li.beta, order_index[li.name]))
-        return src, dst
+        sorted_sources = sorted(source_candidates, key=lambda li: (li.beta, -order_index[li.name]), reverse=True)
+        for src in sorted_sources:
+            dst_candidates = [
+                li for li in participants if li is not src and li.name not in blocked_destinations and li.beta < src.beta
+            ]
+            if not dst_candidates:
+                continue
+            dst = min(dst_candidates, key=lambda li: (li.beta, order_index[li.name]))
+            return src, dst
+        return None, None
 
     def _has_required_direction(required_sign: int, src: LineItem, dst: LineItem) -> bool:
         """Validate that the chosen move changes beta in the required direction."""
@@ -551,21 +572,27 @@ def _rebalance_portfolio(
         if abs(beta_diff) <= tolerance:
             return
         risk_to_add = beta_diff * total_nav
-        src, dst = _pick_source_and_destination(risk_to_add)
-        if src is None or dst is None:
-            return
-        required_sign = 1 if risk_to_add > 0 else -1
-        if not _has_required_direction(required_sign, src, dst):
-            return
-        per_dollar_risk = dst.beta - src.beta
-        if abs(per_dollar_risk) <= min_effect:
-            return
-        if risk_to_add * per_dollar_risk <= 0:
-            return
-
-        available_step = 0.5 * src.liquid_amount()
-        if available_step <= min_effect:
-            return
+        blocked_sources: set[str] = set()
+        blocked_destinations: set[str] = set()
+        src: Optional[LineItem] = None
+        dst: Optional[LineItem] = None
+        while True:
+            src, dst = _pick_source_and_destination(risk_to_add, blocked_sources, blocked_destinations)
+            if src is None or dst is None:
+                return
+            required_sign = 1 if risk_to_add > 0 else -1
+            if not _has_required_direction(required_sign, src, dst):
+                blocked_sources.add(src.name)
+                continue
+            per_dollar_risk = dst.beta - src.beta
+            if abs(per_dollar_risk) <= min_effect or risk_to_add * per_dollar_risk <= 0:
+                blocked_sources.add(src.name)
+                continue
+            available_step = 0.5 * src.liquid_amount()
+            if src.liquid_amount() <= min_effect or available_step <= min_effect:
+                blocked_sources.add(src.name)
+                continue
+            break
 
         prev_beta_diff = beta_diff
         src.update_after_sale(available_step)
