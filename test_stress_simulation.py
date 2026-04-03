@@ -2,7 +2,12 @@ import math
 
 import pandas as pd
 
-from stress_simulation import LineItem, _compute_portfolio_metrics, _rebalance_portfolio
+from stress_simulation import (
+    LineItem,
+    _compute_portfolio_metrics,
+    _initialize_liquidity_order,
+    _rebalance_portfolio,
+)
 from stress_simulation import simulate_portfolio
 
 
@@ -274,3 +279,22 @@ def test_rebalance_decrease_beta_prefers_highest_beta_source_before_liquidity_or
     # should be selected as source first.
     assert items["HighBetaLate"].nav < 20.0
     assert items["UpperMidEarly"].nav == 20.0
+
+
+def test_initialize_liquidity_order_excludes_items_with_none_order():
+    items = _items(
+        LineItem("Cash", 0.0, 0.0, 1.0, 0.0),
+        LineItem("Explicit", 50.0, 0.7, 1.0, 0.0),
+        LineItem("NoneOrdered", 50.0, 0.2, 1.0, 0.0),
+    )
+    liquidity_df = pd.DataFrame(
+        [
+            {"Item": "Explicit", "Liquidity Order": 2},
+            {"Item": "NoneOrdered", "Liquidity Order": None},
+        ]
+    )
+
+    order = _initialize_liquidity_order(liquidity_df, items)
+
+    assert order == ["Cash", "Explicit"]
+    assert "NoneOrdered" not in order
