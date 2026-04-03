@@ -512,29 +512,36 @@ def _rebalance_portfolio(
         participants = [li for li in items.values() if _eligible(li)]
         if len(participants) < 2:
             return None, None
-        if risk_to_add > 0:
-            # Need to increase beta: sell low-beta liquid source, buy high-beta destination.
-            source_candidates = [li for li in participants if li.liquid_amount() > min_effect]
-            if not source_candidates:
-                return None, None
-            src = min(source_candidates, key=lambda li: (order_index[li.name], li.beta))
-            dst = max(
-                [li for li in participants if li is not src],
-                key=lambda li: (-order_index[li.name], li.beta),
-                default=None,
-            )
-            return src, dst
-        # Need to decrease beta: sell high-beta liquid source, buy low-beta destination.
         source_candidates = [li for li in participants if li.liquid_amount() > min_effect]
         if not source_candidates:
             return None, None
-        src = max(source_candidates, key=lambda li: (-order_index[li.name], li.beta))
-        dst = min(
-            [li for li in participants if li is not src],
-            key=lambda li: (order_index[li.name], li.beta),
-            default=None,
-        )
+        if risk_to_add > 0:
+            # Need to increase beta: sell the lowest-beta liquid source
+            # (tie-breaker: earlier liquidity order), buy the highest-beta
+            # destination from remaining participants.
+            src = min(source_candidates, key=lambda li: (li.beta, order_index[li.name]))
+            dst_candidates = [li for li in participants if li is not src and li.beta > src.beta]
+            if not dst_candidates:
+                return None, None
+            # Tie-breaker on destination prefers later liquidity order.
+            dst = max(dst_candidates, key=lambda li: (li.beta, order_index[li.name]))
+            return src, dst
+        # Need to decrease beta: sell the highest-beta liquid source
+        # (tie-breaker: earlier liquidity order), buy the lowest-beta
+        # destination from remaining participants.
+        src = max(source_candidates, key=lambda li: (li.beta, -order_index[li.name]))
+        dst_candidates = [li for li in participants if li is not src and li.beta < src.beta]
+        if not dst_candidates:
+            return None, None
+        dst = min(dst_candidates, key=lambda li: (li.beta, order_index[li.name]))
         return src, dst
+
+    def _has_required_direction(required_sign: int, src: LineItem, dst: LineItem) -> bool:
+        """Validate that the chosen move changes beta in the required direction."""
+        per_dollar_risk = dst.beta - src.beta
+        return (required_sign > 0 and per_dollar_risk > min_effect) or (
+            required_sign < 0 and per_dollar_risk < -min_effect
+        )
 
     for _ in range(max_iters):
         total_nav, beta_current, _ = _compute_portfolio_metrics(items)
@@ -546,6 +553,9 @@ def _rebalance_portfolio(
         risk_to_add = beta_diff * total_nav
         src, dst = _pick_source_and_destination(risk_to_add)
         if src is None or dst is None:
+            return
+        required_sign = 1 if risk_to_add > 0 else -1
+        if not _has_required_direction(required_sign, src, dst):
             return
         per_dollar_risk = dst.beta - src.beta
         if abs(per_dollar_risk) <= min_effect:

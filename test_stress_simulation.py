@@ -200,3 +200,45 @@ def test_rebalance_uses_only_waterfall_items_and_excludes_mep_hedge():
     assert math.isclose(items["PE"].nav, pe_nav_before, abs_tol=1e-9)
     # MEP Hedge is explicitly excluded from rebalancing.
     assert math.isclose(items["MEP Hedge"].nav, hedge_nav_before, abs_tol=1e-9)
+
+
+def test_rebalance_increase_beta_prefers_lowest_beta_source_before_liquidity_order():
+    items = _items(
+        LineItem("Cash", 25.0, 0.0, 1.0, 0.0),
+        LineItem("LowBetaLate", 25.0, 0.1, 1.0, 0.0),
+        LineItem("MidBetaEarly", 25.0, 0.3, 1.0, 0.0),
+        LineItem("HighBeta", 25.0, 1.2, 1.0, 0.0),
+    )
+
+    _rebalance_portfolio(
+        items,
+        beta_start=0.60,
+        liquidity_order=["Cash", "MidBetaEarly", "LowBetaLate", "HighBeta"],
+        tolerance=0.01,
+    )
+
+    # Despite being later in the waterfall, the lowest-beta liquid sleeve
+    # should be selected as source first.
+    assert items["LowBetaLate"].nav < 25.0
+    assert items["MidBetaEarly"].nav == 25.0
+
+
+def test_rebalance_decrease_beta_prefers_highest_beta_source_before_liquidity_order():
+    items = _items(
+        LineItem("Cash", 10.0, 0.0, 1.0, 0.0),
+        LineItem("HighBetaLate", 20.0, 1.2, 1.0, 0.0),
+        LineItem("UpperMidEarly", 20.0, 1.0, 1.0, 0.0),
+        LineItem("LowBeta", 50.0, 0.2, 1.0, 0.0),
+    )
+
+    _rebalance_portfolio(
+        items,
+        beta_start=0.50,
+        liquidity_order=["Cash", "UpperMidEarly", "HighBetaLate", "LowBeta"],
+        tolerance=0.01,
+    )
+
+    # Despite being later in the waterfall, the highest-beta liquid sleeve
+    # should be selected as source first.
+    assert items["HighBetaLate"].nav < 20.0
+    assert items["UpperMidEarly"].nav == 20.0
