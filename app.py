@@ -20,6 +20,7 @@ enable cell editing, ``editable=True`` is passed to ``render.DataGrid``【925037
 from __future__ import annotations
 
 import pandas as pd
+from pathlib import Path
 from shiny import App, ui, render, reactive
 from typing import Tuple, Iterable
 import plotly.graph_objects as go
@@ -75,6 +76,11 @@ default_cash_flows = pd.DataFrame({
 ASSET_ALLOC_COLUMNS = ['Item', 'Allocation', 'Beta', 'Monthly Liquidity %', 'Private %']
 LIQUIDITY_COLUMNS = ['Item', 'Liquidity Order']
 CASH_FLOW_COLUMNS = ['Item', 'Projection Year', 'Capital Call %', 'Distribution %']
+PRELOAD_CSV_MAP: list[tuple[str, list[str], str]] = [
+    ("asset allocation", ASSET_ALLOC_COLUMNS, "asset allocation"),
+    ("liquidity waterfall", LIQUIDITY_COLUMNS, "liquidity waterfall"),
+    ("cash flows", CASH_FLOW_COLUMNS, "cash flows"),
+]
 
 
 def build_app_ui() -> ui.NavbarPage:
@@ -243,12 +249,9 @@ def build_server():
         liq_df_val = reactive.value(default_liquidity.copy())
         cf_df_val = reactive.value(default_cash_flows.copy())
 
-        def read_uploaded_csv(file_info, required_columns: list[str]) -> pd.DataFrame:
-            """Read and validate an uploaded CSV file."""
-            if not file_info:
-                raise ValueError("No file provided.")
-            upload = file_info[0]
-            df = pd.read_csv(upload["datapath"])
+        def read_csv_path(csv_path: Path, required_columns: list[str]) -> pd.DataFrame:
+            """Read and validate a CSV file from disk."""
+            df = pd.read_csv(csv_path)
             missing = [col for col in required_columns if col not in df.columns]
             if missing:
                 raise ValueError(
@@ -258,6 +261,42 @@ def build_server():
                     + ", ".join(required_columns)
                 )
             return df[required_columns].copy()
+
+        def read_uploaded_csv(file_info, required_columns: list[str]) -> pd.DataFrame:
+            """Read and validate an uploaded CSV file."""
+            if not file_info:
+                raise ValueError("No file provided.")
+            upload = file_info[0]
+            return read_csv_path(Path(upload["datapath"]), required_columns)
+
+        # Preload CSV files from the working directory on app startup when present.
+        csv_files_by_stem = {
+            path.stem.strip().lower(): path
+            for path in Path.cwd().glob("*.csv")
+        }
+        for expected_stem, required_columns, table_label in PRELOAD_CSV_MAP:
+            csv_path = csv_files_by_stem.get(expected_stem)
+            if csv_path is None:
+                continue
+            try:
+                df = read_csv_path(csv_path, required_columns).reset_index(drop=True)
+                if table_label == "asset allocation":
+                    asset_df_val.set(df)
+                elif table_label == "liquidity waterfall":
+                    liq_df_val.set(df)
+                else:
+                    cf_df_val.set(df)
+                ui.notification_show(
+                    f'Loaded {table_label} from "{csv_path.name}".',
+                    type="message",
+                    duration=4,
+                )
+            except Exception as exc:
+                ui.notification_show(
+                    f'Failed to preload "{csv_path.name}": {exc}',
+                    type="error",
+                    duration=8,
+                )
 
         # --- Data tables: asset allocation ---
         @render.data_frame
