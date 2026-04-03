@@ -219,6 +219,7 @@ def build_app_ui() -> ui.NavbarPage:
                         ui.column(6, ui.div(output_widget("beta_fan_plot"), class_="result-chart")),
                         ui.column(6, ui.div(output_widget("private_fan_plot"), class_="result-chart")),
                     ),
+                    ui.input_action_button("show_mc_table", "Show underlying data", class_="btn-outline-secondary"),
                 ),
                 multiple=False,
             ),
@@ -719,11 +720,25 @@ def build_server():
             table['Year'] = table['Year'].astype(int)
             return table
 
-        def show_table_modal(title: str, table_df: pd.DataFrame):
+        scenario_csv_val = reactive.value(pd.DataFrame())
+        scenario_csv_filename_val = reactive.value("scenario_underlying_data.csv")
+
+        def show_table_modal(
+            title: str,
+            table_df: pd.DataFrame,
+            csv_df: pd.DataFrame | None = None,
+            csv_filename: str = "scenario_underlying_data.csv",
+        ):
+            if csv_df is None:
+                csv_df = pd.DataFrame()
             ui.modal_show(
                 ui.modal(
                     ui.p("Column guide: pre = after return/cash-flow and before dividend; post = after dividend; after rebalance = final year-end value."),
                     ui.output_data_frame("scenario_modal_table"),
+                    ui.hr(),
+                    ui.h5("Download CSV data"),
+                    ui.p("Includes any supplemental data behind plotted visuals when available."),
+                    ui.download_button("download_scenario_csv", "Download CSV"),
                     title=title,
                     size="l",
                     easy_close=True,
@@ -731,6 +746,8 @@ def build_server():
                 )
             )
             modal_table_val.set(table_df)
+            scenario_csv_val.set(csv_df)
+            scenario_csv_filename_val.set(csv_filename)
 
         modal_table_val = reactive.value(pd.DataFrame())
 
@@ -742,15 +759,40 @@ def build_server():
                 return render.DataTable(pd.DataFrame())
             return render.DataTable(df, filters=True)
 
+        @render.download(filename=lambda: scenario_csv_filename_val())
+        def download_scenario_csv():
+            csv_df = scenario_csv_val()
+            if csv_df is None or csv_df.empty:
+                csv_df = modal_table_val()
+            if csv_df is None or csv_df.empty:
+                csv_df = pd.DataFrame({"message": ["No data available."]})
+            yield csv_df.to_csv(index=False)
+
         @reactive.effect
         @reactive.event(input.show_v_table)
         def _show_v_table_modal():
-            show_table_modal("V-shaped scenario data", format_scenario_table(v_scenario_results()))
+            df = v_scenario_results()
+            df_asset, _, _ = get_user_tables()
+            nav_stacked_df = build_item_allocation_frame(df, df_asset).sort_values(["year", "item"]).reset_index(drop=True)
+            show_table_modal(
+                "V-shaped scenario data",
+                format_scenario_table(df),
+                csv_df=nav_stacked_df,
+                csv_filename="v_nav_growth_by_item.csv",
+            )
 
         @reactive.effect
         @reactive.event(input.show_u_table)
         def _show_u_table_modal():
-            show_table_modal("U-shaped scenario data", format_scenario_table(u_scenario_results()))
+            df = u_scenario_results()
+            df_asset, _, _ = get_user_tables()
+            nav_stacked_df = build_item_allocation_frame(df, df_asset).sort_values(["year", "item"]).reset_index(drop=True)
+            show_table_modal(
+                "U-shaped scenario data",
+                format_scenario_table(df),
+                csv_df=nav_stacked_df,
+                csv_filename="u_nav_growth_by_item.csv",
+            )
 
         @render.data_frame
         def v_scenario_table():
@@ -1002,8 +1044,11 @@ def build_server():
             )
             return fig
 
-        # Monte Carlo simulation event reactive
-        @reactive.event(input.simulate)
+        mc_results_val = reactive.value(pd.DataFrame())
+
+        # Monte Carlo simulation reactive calculation
+        @reactive.calc
+        @reactive.event(input.simulate, input.n_paths)
         def mc_results():
             df_asset, df_liq, df_cf = get_user_tables()
             years = int(input.n_years())
@@ -1014,7 +1059,7 @@ def build_server():
             div_type = str(input.dividend_type())
             dividend_is_percent = div_type.lower().startswith("p")
             div_amt = normalize_dividend_amount(div_amt, dividend_is_percent)
-            n_paths = int(input.n_paths())
+            n_paths = max(1, int(input.n_paths()))
             # Run simulation
             res = run_multiple_simulations(
                 n_paths=n_paths,
@@ -1032,6 +1077,24 @@ def build_server():
                 random_seed=None,
             )
             return res
+
+        @reactive.effect
+        def _store_mc_results():
+            mc_results_val.set(mc_results())
+
+        @reactive.effect
+        @reactive.event(input.show_mc_table)
+        def _show_mc_table_modal():
+            df = mc_results_val()
+            if df is None or df.empty:
+                ui.notification_show("Run Monte Carlo simulation first.", type="warning")
+                return
+            show_table_modal(
+                "Monte Carlo scenario data",
+                df.sort_values(["path", "year"]).reset_index(drop=True),
+                csv_df=df.sort_values(["path", "year"]).reset_index(drop=True),
+                csv_filename=f"monte_carlo_paths_{int(input.n_paths())}.csv",
+            )
 
         # Helper to compute quantile tables
         def compute_quantiles(df: pd.DataFrame, column: str, quantiles: Iterable[float] = (0.05, 0.25, 0.5, 0.75, 0.95)) -> pd.DataFrame:
@@ -1053,7 +1116,7 @@ def build_server():
         @render_widget
         def mc_market_plot():
             try:
-                df = mc_results()
+                df = mc_results_val()
             except Exception:
                 df = None
             fig = go.Figure()
@@ -1086,7 +1149,7 @@ def build_server():
         @render_widget
         def nav_fan_plot():
             try:
-                df = mc_results()
+                df = mc_results_val()
             except Exception:
                 df = None
             fig = go.Figure()
@@ -1114,7 +1177,7 @@ def build_server():
         @render_widget
         def beta_fan_plot():
             try:
-                df = mc_results()
+                df = mc_results_val()
             except Exception:
                 df = None
             fig = go.Figure()
@@ -1151,7 +1214,7 @@ def build_server():
         @render_widget
         def private_fan_plot():
             try:
-                df = mc_results()
+                df = mc_results_val()
             except Exception:
                 df = None
             fig = go.Figure()
