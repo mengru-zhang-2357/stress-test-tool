@@ -299,12 +299,24 @@ def build_server():
                 )
 
         # --- Data tables: asset allocation ---
+        def _grid_ready_df(df: pd.DataFrame) -> pd.DataFrame:
+            """Return a DataGrid-safe copy that accepts pasted string values.
+
+            Shiny's editable DataGrid applies client-side paste payloads before
+            server-side coercion. If numeric columns are strict float/int dtypes,
+            multi-cell paste operations can fail with dtype errors when values
+            arrive as strings. Casting to object prevents hard dtype rejection
+            during editing; numeric coercion still happens later in
+            ``get_user_tables()``.
+            """
+            return df.copy().astype(object)
+
         @render.data_frame
         def asset_alloc_table():
             # Provide editable data grid for asset allocation.
             # Use selection_mode="rows" to enable row selection/editing when editable=True.
             return render.DataGrid(
-                asset_df_val().copy(),
+                _grid_ready_df(asset_df_val()),
                 editable=True,
                 selection_mode="rows",
             )
@@ -312,7 +324,7 @@ def build_server():
         @render.data_frame
         def liquidity_table():
             return render.DataGrid(
-                liq_df_val().copy(),
+                _grid_ready_df(liq_df_val()),
                 editable=True,
                 selection_mode="rows",
             )
@@ -320,7 +332,7 @@ def build_server():
         @render.data_frame
         def cash_flow_table():
             return render.DataGrid(
-                cf_df_val().copy(),
+                _grid_ready_df(cf_df_val()),
                 editable=True,
                 selection_mode="rows",
             )
