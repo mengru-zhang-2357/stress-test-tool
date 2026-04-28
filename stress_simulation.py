@@ -43,7 +43,7 @@ import math
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Iterable
+from typing import Dict, List, Optional, Tuple, Iterable, Sequence
 
 
 def _to_fraction(value: float) -> float:
@@ -291,7 +291,6 @@ def _initialize_cash_flows(cash_flows_df: pd.DataFrame) -> Dict[str, Dict[int, T
         if name not in flows:
             flows[name] = {}
         flows[name][year] = (call_pct, dist_pct)
-    print(flows)
     return flows
 
 
@@ -631,6 +630,9 @@ def simulate_portfolio(
     mean_return: float = 0.08,
     std_dev: float = 0.16,
     random_state: Optional[np.random.Generator] = None,
+    include_year1_shock: bool = True,
+    custom_period_returns: Optional[Sequence[float]] = None,
+    periods_per_year: int = 1,
 ) -> pd.DataFrame:
     """Simulate the evolution of a portfolio over multiple years.
 
@@ -695,18 +697,21 @@ def simulate_portfolio(
     total_nav, beta_start, private_start = _compute_portfolio_metrics(items)
     # Preallocate list of results
     results: List[Dict[str, object]] = []
-    # Market return for year 1 is the shock: –40 %
-    market_returns: Dict[int, float] = {1: -0.40}
+    # Optional legacy year-1 market shock used by deterministic scenarios.
+    market_returns: Dict[int, float] = {1: -0.40} if include_year1_shock else {}
     # Add scenario returns override
     if scenario_returns:
         for k, v in scenario_returns.items():
             market_returns[k] = v
     private_cash_flow_items = set(cash_flows.keys())
     # Simulate each year
-    for year in range(1, n_years + 1):
+    total_periods = max(1, int(n_years) * max(1, int(periods_per_year)))
+    for period in range(1, total_periods + 1):
         # Determine market return for this year
-        if year in market_returns:
-            mr = float(market_returns[year])
+        if custom_period_returns is not None and period <= len(custom_period_returns):
+            mr = float(custom_period_returns[period - 1])
+        elif period in market_returns:
+            mr = float(market_returns[period])
         else:
             mr = float(rng.normal(loc=mean_return, scale=std_dev))
         # Apply returns in two branches:
@@ -721,7 +726,7 @@ def simulate_portfolio(
         _apply_private_cash_flows(
             items,
             cash_flows,
-            year,
+            period,
             baseline_return,
             illiquidity_premium,
             mr,
@@ -771,7 +776,8 @@ def simulate_portfolio(
             for name, li in items.items()
         }
         results.append({
-            'year': year,
+            'year': period / max(1, int(periods_per_year)),
+            'period': period,
             'market_return': mr,
             'nav_total_pre': total_nav_pre,
             'beta_pre': beta_pre,
@@ -806,6 +812,9 @@ def run_multiple_simulations(
     mean_return: float = 0.08,
     std_dev: float = 0.16,
     random_seed: Optional[int] = None,
+    include_year1_shock: bool = False,
+    custom_period_returns: Optional[Sequence[float]] = None,
+    periods_per_year: int = 1,
 ) -> pd.DataFrame:
     """Run multiple simulation paths and return aggregated results.
 
@@ -850,11 +859,15 @@ def run_multiple_simulations(
             mean_return=mean_return,
             std_dev=std_dev,
             random_state=np.random.default_rng(int(path_seed)),
+            include_year1_shock=include_year1_shock,
+            custom_period_returns=custom_period_returns,
+            periods_per_year=periods_per_year,
         )
         for _, row in df.iterrows():
             records.append({
                 'path': path,
-                'year': int(row['year']),
+                'year': float(row['year']),
+                'period': int(row.get('period', 0)),
                 'nav_total': row['nav_total'],
                 'beta_total': row['beta_total'],
                 'private_total': row['private_total'],

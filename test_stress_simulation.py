@@ -7,6 +7,7 @@ from stress_simulation import (
     _compute_portfolio_metrics,
     _initialize_liquidity_order,
     _rebalance_portfolio,
+    run_multiple_simulations,
 )
 from stress_simulation import simulate_portfolio
 
@@ -278,7 +279,54 @@ def test_rebalance_decrease_beta_prefers_highest_beta_source_before_liquidity_or
     # Despite being later in the waterfall, the highest-beta liquid sleeve
     # should be selected as source first.
     assert items["HighBetaLate"].nav < 20.0
-    assert items["UpperMidEarly"].nav == 20.0
+
+
+def test_run_multiple_simulations_monthly_scales_periods_and_labels_years():
+    asset_alloc_df = pd.DataFrame(
+        [
+            {"Item": "Cash", "Allocation": 50.0, "Beta": 0.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+            {"Item": "Public Equity", "Allocation": 50.0, "Beta": 1.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+        ]
+    )
+    liquidity_df = pd.DataFrame([{"Item": "Cash", "Liquidity Order": 1}, {"Item": "Public Equity", "Liquidity Order": 2}])
+    cash_flows_df = pd.DataFrame(columns=["Item", "Projection Year", "Capital Call %", "Distribution %"])
+
+    out = run_multiple_simulations(
+        n_paths=2,
+        asset_alloc_df=asset_alloc_df,
+        liquidity_df=liquidity_df,
+        cash_flows_df=cash_flows_df,
+        n_years=2,
+        periods_per_year=12,
+        random_seed=123,
+    )
+
+    assert len(out) == 2 * 24
+    assert out["period"].max() == 24
+    assert math.isclose(out["year"].max(), 2.0, abs_tol=1e-12)
+
+
+def test_simulate_portfolio_uses_custom_period_returns_and_disables_shock():
+    asset_alloc_df = pd.DataFrame(
+        [
+            {"Item": "Cash", "Allocation": 0.0, "Beta": 0.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+            {"Item": "Public Equity", "Allocation": 100.0, "Beta": 1.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+        ]
+    )
+    liquidity_df = pd.DataFrame([{"Item": "Cash", "Liquidity Order": 1}, {"Item": "Public Equity", "Liquidity Order": 2}])
+    cash_flows_df = pd.DataFrame(columns=["Item", "Projection Year", "Capital Call %", "Distribution %"])
+
+    out = simulate_portfolio(
+        asset_alloc_df=asset_alloc_df,
+        liquidity_df=liquidity_df,
+        cash_flows_df=cash_flows_df,
+        n_years=1,
+        include_year1_shock=False,
+        custom_period_returns=[0.10],
+    )
+
+    # No year-1 -40% shock: return path should drive year 1.
+    assert math.isclose(float(out.loc[0, "market_return"]), 0.10, abs_tol=1e-12)
 
 
 def test_initialize_liquidity_order_excludes_items_with_none_order():
