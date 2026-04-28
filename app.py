@@ -151,6 +151,7 @@ def build_app_ui() -> ui.NavbarPage:
                         accept=[".csv"],
                         multiple=False,
                     ),
+                    ui.download_button("download_mc_return_template_csv", "Download return template"),
                     ui.hr(),
                     ui.h5("Dividend NAV base"),
                     ui.input_radio_buttons(
@@ -165,6 +166,7 @@ def build_app_ui() -> ui.NavbarPage:
                         accept=[".csv"],
                         multiple=False,
                     ),
+                    ui.download_button("download_smoothed_nav_template_csv", "Download NAV template"),
                     ui.input_text("analysis_start_date", "Analysis start date (YYYY-MM-DD)", ""),
                     ui.input_numeric("smoothing_quarters", "Quarters to smooth over", 4),
                     ui.input_action_button("simulate", "Simulate"),
@@ -621,6 +623,21 @@ def build_server():
             except Exception as exc:
                 ui.notification_show(f"Return path CSV could not be read: {exc}", type="warning", duration=8)
                 return []
+
+        @render.download(filename="mc_return_template.csv")
+        def download_mc_return_template_csv():
+            template_df = pd.DataFrame({"Return": [0.05, -0.12, 0.08]})
+            yield template_df.to_csv(index=False)
+
+        @render.download(filename="smoothed_nav_template.csv")
+        def download_smoothed_nav_template_csv():
+            template_df = pd.DataFrame(
+                {
+                    "Date": ["2024-03-31", "2024-06-30", "2024-09-30"],
+                    "NAV": [1000000000, 980000000, 1025000000],
+                }
+            )
+            yield template_df.to_csv(index=False)
 
         def _build_smoothed_nav_dividend_base(post_return_nav: float) -> float:
             file_info = input.smoothed_nav_csv()
