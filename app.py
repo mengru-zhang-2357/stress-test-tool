@@ -19,6 +19,7 @@ enable cell editing, ``editable=True`` is passed to ``render.DataGrid``【925037
 
 from __future__ import annotations
 
+import math
 import pandas as pd
 from pathlib import Path
 from shiny import App, ui, render, reactive
@@ -134,6 +135,38 @@ def build_app_ui() -> ui.NavbarPage:
                         "Number of simulation paths",
                         100,
                     ),
+                    ui.input_select(
+                        "mc_frequency",
+                        "Monte Carlo frequency",
+                        choices={
+                            "annual": "Annual",
+                            "quarterly": "Quarterly",
+                            "monthly": "Monthly",
+                        },
+                        selected="annual",
+                    ),
+                    ui.input_file(
+                        "mc_return_path_csv",
+                        "Upload return path CSV (optional)",
+                        accept=[".csv"],
+                        multiple=False,
+                    ),
+                    ui.hr(),
+                    ui.h5("Dividend NAV base"),
+                    ui.input_radio_buttons(
+                        "dividend_nav_base",
+                        "Percent dividend NAV base",
+                        choices=["Post-return NAV", "Smoothed NAV"],
+                        selected="Post-return NAV",
+                    ),
+                    ui.input_file(
+                        "smoothed_nav_csv",
+                        "Upload smoothed NAV history CSV (Date, NAV)",
+                        accept=[".csv"],
+                        multiple=False,
+                    ),
+                    ui.input_text("analysis_start_date", "Analysis start date (YYYY-MM-DD)", ""),
+                    ui.input_numeric("smoothing_quarters", "Quarters to smooth over", 4),
                     ui.input_action_button("simulate", "Simulate"),
                 ),
                 # Main content: outputs and descriptions
@@ -226,6 +259,11 @@ def build_app_ui() -> ui.NavbarPage:
                         ui.column(6, ui.div(output_widget("private_fan_plot"), class_="result-chart")),
                     ),
                     ui.input_action_button("show_mc_table", "Show underlying data", class_="btn-outline-secondary"),
+                    ui.br(),
+                    ui.download_button("download_mc_market_csv", "Download market fan data"),
+                    ui.download_button("download_mc_nav_csv", "Download NAV fan data"),
+                    ui.download_button("download_mc_beta_csv", "Download beta fan data"),
+                    ui.download_button("download_mc_private_csv", "Download private % fan data"),
                 ),
                 multiple=False,
             ),
@@ -554,6 +592,74 @@ def build_server():
             if dividend_is_percent and abs(div_amt) > 1.0:
                 return div_amt / 100.0
             return div_amt
+
+        def get_periods_per_year() -> int:
+            freq = str(input.mc_frequency()).lower()
+            if freq == "monthly":
+                return 12
+            if freq == "quarterly":
+                return 4
+            return 1
+
+        def read_return_path_from_upload() -> list[float]:
+            file_info = input.mc_return_path_csv()
+            if not file_info:
+                return []
+            try:
+                df = pd.read_csv(Path(file_info[0]["datapath"]))
+                if df.empty:
+                    return []
+                candidate_col = None
+                for col in df.columns:
+                    if "return" in col.lower():
+                        candidate_col = col
+                        break
+                if candidate_col is None:
+                    candidate_col = df.columns[0]
+                vals = pd.to_numeric(df[candidate_col], errors="coerce").dropna().astype(float).tolist()
+                return vals
+            except Exception as exc:
+                ui.notification_show(f"Return path CSV could not be read: {exc}", type="warning", duration=8)
+                return []
+
+        def _build_smoothed_nav_dividend_base(post_return_nav: float) -> float:
+            file_info = input.smoothed_nav_csv()
+            if not file_info:
+                return post_return_nav
+            try:
+                hist = pd.read_csv(Path(file_info[0]["datapath"]))
+                if hist.shape[1] < 2:
+                    return post_return_nav
+                hist = hist.iloc[:, :2].copy()
+                hist.columns = ["Date", "NAV"]
+                hist["Date"] = pd.to_datetime(hist["Date"], errors="coerce")
+                hist["NAV"] = pd.to_numeric(hist["NAV"], errors="coerce")
+                hist = hist.dropna(subset=["Date", "NAV"]).sort_values("Date")
+                if hist.empty:
+                    return post_return_nav
+                start_text = str(input.analysis_start_date() or "").strip()
+                if start_text:
+                    current_date = pd.to_datetime(start_text, errors="coerce")
+                    if pd.isna(current_date):
+                        return post_return_nav
+                else:
+                    current_date = pd.Timestamp.today().normalize()
+                quarters = max(1, int(input.smoothing_quarters()))
+                quarter_end = (pd.Timestamp(current_date) + pd.offsets.QuarterEnd(0)).normalize()
+                hist_q = (
+                    hist.set_index("Date")
+                    .resample("QE")["NAV"]
+                    .last()
+                    .dropna()
+                    .reset_index()
+                )
+                hist_q = hist_q[hist_q["Date"] <= quarter_end]
+                series_vals = hist_q["NAV"].tolist()
+                series_vals.append(float(post_return_nav))
+                return float(pd.Series(series_vals).tail(quarters).mean())
+            except Exception as exc:
+                ui.notification_show(f"Smoothed NAV CSV could not be read: {exc}", type="warning", duration=8)
+                return post_return_nav
 
         def build_item_allocation_frame(scenario_df: pd.DataFrame, df_asset: pd.DataFrame) -> pd.DataFrame:
             """Build per-year, per-item NAV snapshots and private-contribution data."""
@@ -1120,6 +1226,35 @@ def build_server():
             dividend_is_percent = div_type.lower().startswith("p")
             div_amt = normalize_dividend_amount(div_amt, dividend_is_percent)
             n_paths = max(1, int(input.n_paths()))
+            periods_per_year = get_periods_per_year()
+            scaled_mean = br / periods_per_year
+            scaled_std = bstd / math.sqrt(periods_per_year)
+            return_path = read_return_path_from_upload()
+            total_periods = max(1, years * periods_per_year)
+            if return_path and len(return_path) < total_periods:
+                ui.notification_show(
+                    f"Return path has {len(return_path)} entries; remaining periods will be randomly simulated.",
+                    type="message",
+                    duration=6,
+                )
+            if return_path:
+                custom_returns = return_path[:total_periods]
+            else:
+                custom_returns = None
+            if dividend_is_percent and str(input.dividend_nav_base()).lower().startswith("smoothed"):
+                # Use current (pre-dividend) NAV approximation as a smoothing anchor.
+                nav_anchor = float(df_asset["Allocation"].sum()) if not df_asset.empty else 0.0
+                div_base = _build_smoothed_nav_dividend_base(nav_anchor)
+                # Annualized percent-of-NAV dividend converted into per-period dollars.
+                annual_dividend_amount = div_amt * div_base
+                run_dividend = annual_dividend_amount / periods_per_year
+                run_dividend_is_percent = False
+            elif not dividend_is_percent:
+                run_dividend = div_amt / periods_per_year
+                run_dividend_is_percent = False
+            else:
+                run_dividend = div_amt / periods_per_year
+                run_dividend_is_percent = True
             # Run simulation
             res = run_multiple_simulations(
                 n_paths=n_paths,
@@ -1129,12 +1264,15 @@ def build_server():
                 baseline_return=br,
                 baseline_std=bstd,
                 illiquidity_premium=illiquidity_premium,
-                annual_dividend=div_amt,
-                dividend_is_percent=dividend_is_percent,
+                annual_dividend=run_dividend,
+                dividend_is_percent=run_dividend_is_percent,
                 n_years=years,
-                mean_return=br,
-                std_dev=bstd,
+                mean_return=scaled_mean,
+                std_dev=scaled_std,
                 random_seed=None,
+                include_year1_shock=False,
+                custom_period_returns=custom_returns,
+                periods_per_year=periods_per_year,
             )
             return res
 
@@ -1169,37 +1307,114 @@ def build_server():
                 for col in q_df.columns:
                     if col != 'Year':
                         q_df[col] = q_df[col].astype(float).round(2)
-                q_df['Year'] = q_df['Year'].astype(int)
+                q_df['Year'] = q_df['Year'].astype(float).round(4)
             return q_df
 
         # Render fan charts
+        @reactive.calc
+        def mc_market_quantiles_df():
+            df = mc_results_val()
+            if df is None or df.empty or "market_return" not in df.columns:
+                return pd.DataFrame()
+            growth_df = df[['path', 'year', 'market_return']].copy().sort_values(['path', 'year'])
+            growth_df['market_growth'] = growth_df.groupby('path')['market_return'].transform(lambda s: (1 + s).cumprod())
+            q_df = compute_quantiles(growth_df, 'market_growth')
+            if not q_df.empty:
+                baseline_row = {'Year': 0.0}
+                for col in q_df.columns[1:]:
+                    baseline_row[col] = 1.0
+                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
+            return q_df
+
+        @reactive.calc
+        def mc_nav_quantiles_df():
+            df = mc_results_val()
+            if df is None or df.empty:
+                return pd.DataFrame()
+            q_df = compute_quantiles(df, 'nav_total')
+            df_asset, _, _ = get_user_tables()
+            nav0 = float(df_asset['Allocation'].sum()) if not df_asset.empty else 0.0
+            if not q_df.empty:
+                baseline_row = {'Year': 0.0}
+                for col in q_df.columns[1:]:
+                    baseline_row[col] = round(nav0, 2)
+                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
+            return q_df
+
+        @reactive.calc
+        def mc_beta_quantiles_df():
+            df = mc_results_val()
+            if df is None or df.empty:
+                return pd.DataFrame()
+            q_df = compute_quantiles(df, 'beta_total')
+            df_asset, _, _ = get_user_tables()
+            nav0 = df_asset['Allocation'].sum()
+            beta0 = (df_asset['Allocation'] * df_asset['Beta'].astype(float)).sum() / nav0 if nav0 > 0 else 0.0
+            if not q_df.empty:
+                baseline_row = {'Year': 0.0}
+                for col in q_df.columns[1:]:
+                    baseline_row[col] = round(beta0, 2)
+                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
+            return q_df
+
+        @reactive.calc
+        def mc_private_quantiles_df():
+            df = mc_results_val()
+            if df is None or df.empty:
+                return pd.DataFrame()
+            q_df = compute_quantiles(df, 'private_total')
+            df_asset, _, _ = get_user_tables()
+            nav0 = df_asset['Allocation'].sum()
+            private0 = 0.0
+            if nav0 > 0:
+                private_vals = pd.to_numeric(df_asset['Private %'], errors='coerce').fillna(0.0)
+                private_frac_series = private_vals.apply(lambda val: (val / 100.0) if abs(val) > 1.0 else val)
+                private0 = (df_asset['Allocation'] * private_frac_series).sum() / nav0
+            if not q_df.empty:
+                baseline_row = {'Year': 0.0}
+                for col in q_df.columns[1:]:
+                    baseline_row[col] = round(private0, 2)
+                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
+            return q_df
+
+        @render.download(filename="mc_market_fan_data.csv")
+        def download_mc_market_csv():
+            df = mc_market_quantiles_df()
+            yield (df if not df.empty else pd.DataFrame({"message": ["No data available."]})).to_csv(index=False)
+
+        @render.download(filename="mc_nav_fan_data.csv")
+        def download_mc_nav_csv():
+            df = mc_nav_quantiles_df()
+            yield (df if not df.empty else pd.DataFrame({"message": ["No data available."]})).to_csv(index=False)
+
+        @render.download(filename="mc_beta_fan_data.csv")
+        def download_mc_beta_csv():
+            df = mc_beta_quantiles_df()
+            yield (df if not df.empty else pd.DataFrame({"message": ["No data available."]})).to_csv(index=False)
+
+        @render.download(filename="mc_private_fan_data.csv")
+        def download_mc_private_csv():
+            df = mc_private_quantiles_df()
+            yield (df if not df.empty else pd.DataFrame({"message": ["No data available."]})).to_csv(index=False)
+
         @render_widget
         def mc_market_plot():
             try:
-                df = mc_results_val()
+                q_df = mc_market_quantiles_df()
             except Exception:
-                df = None
+                q_df = None
             fig = go.Figure()
-            if df is None or df.empty or 'market_return' not in df.columns:
+            if q_df is None or q_df.empty:
                 fig.update_layout(
                     title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1',
                     template='plotly_white'
                 )
                 return fig
-            growth_df = df[['path', 'year', 'market_return']].copy()
-            growth_df = growth_df.sort_values(['path', 'year'])
-            growth_df['growth'] = growth_df.groupby('path')['market_return'].transform(lambda s: (1 + s).cumprod())
-            q_df = compute_quantiles(growth_df.rename(columns={'growth': 'market_growth'}), 'market_growth')
-            if not q_df.empty:
-                baseline_row = {'Year': 0}
-                for col in q_df.columns[1:]:
-                    baseline_row[col] = 1.0
-                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
-                for col in q_df.columns[1:]:
-                    fig.add_trace(go.Scatter(
-                        x=q_df['Year'], y=q_df[col], mode='lines', name=col,
-                        hovertemplate='Year: %{x}<br>Growth: %{y:.2f}<extra>%{fullData.name}</extra>'
-                    ))
+            for col in q_df.columns[1:]:
+                fig.add_trace(go.Scatter(
+                    x=q_df['Year'], y=q_df[col], mode='lines', name=col,
+                    hovertemplate='Year: %{x}<br>Growth: %{y:.2f}<extra>%{fullData.name}</extra>'
+                ))
             fig.update_layout(
                 title='Market Index Growth Fan Chart', xaxis_title='Year', yaxis_title='Growth of $1',
                 template='plotly_white'
@@ -1209,23 +1424,13 @@ def build_server():
         @render_widget
         def nav_fan_plot():
             try:
-                df = mc_results_val()
+                q_df = mc_nav_quantiles_df()
             except Exception:
-                df = None
+                q_df = None
             fig = go.Figure()
-            if df is None or df.empty:
+            if q_df is None or q_df.empty:
                 fig.update_layout(title='Portfolio NAV Fan Chart', xaxis_title='Year', yaxis_title='NAV', template='plotly_white')
                 return fig
-            q_df = compute_quantiles(df, 'nav_total')
-            # Insert a baseline row (Year 0) corresponding to the starting portfolio NAV.
-            # Compute the baseline using the current asset allocation table.
-            df_asset, _, _ = get_user_tables()
-            nav0 = df_asset['Allocation'].sum()
-            if not q_df.empty:
-                baseline_row = {'Year': 0}
-                for col in q_df.columns[1:]:
-                    baseline_row[col] = round(nav0, 2)
-                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
             for col in q_df.columns[1:]:
                 fig.add_trace(go.Scatter(
                     x=q_df['Year'], y=q_df[col], mode='lines', name=col,
@@ -1237,29 +1442,16 @@ def build_server():
         @render_widget
         def beta_fan_plot():
             try:
-                df = mc_results_val()
+                q_df = mc_beta_quantiles_df()
             except Exception:
-                df = None
+                q_df = None
             fig = go.Figure()
-            if df is None or df.empty:
+            if q_df is None or q_df.empty:
                 fig.update_layout(
                     title='Portfolio Beta Fan Chart', xaxis_title='Year', yaxis_title='Beta',
                     yaxis=dict(range=[0.55, 0.85]), template='plotly_white'
                 )
                 return fig
-            q_df = compute_quantiles(df, 'beta_total')
-            # Insert a baseline row for Year 0 corresponding to the starting portfolio beta.
-            df_asset, _, _ = get_user_tables()
-            nav0 = df_asset['Allocation'].sum()
-            if nav0 > 0:
-                beta0 = (df_asset['Allocation'] * df_asset['Beta'].astype(float)).sum() / nav0
-            else:
-                beta0 = 0.0
-            if not q_df.empty:
-                baseline_row = {'Year': 0}
-                for col in q_df.columns[1:]:
-                    baseline_row[col] = round(beta0, 2)
-                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
             for col in q_df.columns[1:]:
                 fig.add_trace(go.Scatter(
                     x=q_df['Year'], y=q_df[col], mode='lines', name=col,
@@ -1274,39 +1466,16 @@ def build_server():
         @render_widget
         def private_fan_plot():
             try:
-                df = mc_results_val()
+                q_df = mc_private_quantiles_df()
             except Exception:
-                df = None
+                q_df = None
             fig = go.Figure()
-            if df is None or df.empty:
+            if q_df is None or q_df.empty:
                 fig.update_layout(
                     title='Portfolio Private % Fan Chart', xaxis_title='Year', yaxis_title='Private %',
                     template='plotly_white'
                 )
                 return fig
-            q_df = compute_quantiles(df, 'private_total')
-            # Insert a baseline row (Year 0) corresponding to the starting portfolio private fraction.
-            df_asset, _, _ = get_user_tables()
-            nav0 = df_asset['Allocation'].sum()
-            # Local helper to convert percentage-like values to fractions
-            def _to_fraction_local(val):
-                try:
-                    val_float = float(val)
-                except Exception:
-                    return 0.0
-                if pd.isna(val_float):
-                    return 0.0
-                return val_float / 100.0 if abs(val_float) > 1.0 else val_float
-            if nav0 > 0:
-                private_frac_series = df_asset['Private %'].apply(_to_fraction_local)
-                private0 = (df_asset['Allocation'] * private_frac_series).sum() / nav0
-            else:
-                private0 = 0.0
-            if not q_df.empty:
-                baseline_row = {'Year': 0}
-                for col in q_df.columns[1:]:
-                    baseline_row[col] = round(private0, 2)
-                q_df = pd.concat([pd.DataFrame([baseline_row]), q_df], ignore_index=True)
             for col in q_df.columns[1:]:
                 fig.add_trace(go.Scatter(
                     x=q_df['Year'], y=q_df[col], mode='lines', name=col,
