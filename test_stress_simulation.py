@@ -329,6 +329,72 @@ def test_simulate_portfolio_uses_custom_period_returns_and_disables_shock():
     assert math.isclose(float(out.loc[0, "market_return"]), 0.10, abs_tol=1e-12)
 
 
+def test_private_cash_flow_projection_year_is_mapped_from_period():
+    asset_alloc_df = pd.DataFrame(
+        [
+            {"Item": "Cash", "Allocation": 100.0, "Beta": 0.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+            {"Item": "Buyout", "Allocation": 100.0, "Beta": 0.0, "Monthly Liquidity %": 0.0, "Private %": 1.0},
+        ]
+    )
+    liquidity_df = pd.DataFrame([{"Item": "Cash", "Liquidity Order": 1}, {"Item": "Buyout", "Liquidity Order": 2}])
+    cash_flows_df = pd.DataFrame(
+        [
+            {"Item": "Buyout", "Projection Year": 2, "Capital Call %": 0.0, "Distribution %": 100.0},
+        ]
+    )
+
+    out = simulate_portfolio(
+        asset_alloc_df=asset_alloc_df,
+        liquidity_df=liquidity_df,
+        cash_flows_df=cash_flows_df,
+        baseline_return=0.0,
+        illiquidity_premium=0.0,
+        n_years=2,
+        include_year1_shock=False,
+        custom_period_returns=[0.0] * 8,
+        periods_per_year=4,
+    )
+
+    pre_year2 = out[out["period"] <= 4]
+    in_year2 = out[(out["period"] >= 5) & (out["period"] <= 8)]
+    assert pre_year2["nav_total_pre"].eq(200.0).all()
+    assert in_year2["nav_total_pre"].lt(200.0).any()
+
+
+def test_private_cash_flow_percentages_are_scaled_by_period_frequency():
+    asset_alloc_df = pd.DataFrame(
+        [
+            {"Item": "Cash", "Allocation": 100.0, "Beta": 0.0, "Monthly Liquidity %": 1.0, "Private %": 0.0},
+            {"Item": "Buyout", "Allocation": 100.0, "Beta": 0.0, "Monthly Liquidity %": 0.0, "Private %": 1.0},
+        ]
+    )
+    liquidity_df = pd.DataFrame([{"Item": "Cash", "Liquidity Order": 1}, {"Item": "Buyout", "Liquidity Order": 2}])
+    cash_flows_df = pd.DataFrame(
+        [
+            {"Item": "Buyout", "Projection Year": 1, "Capital Call %": 40.0, "Distribution %": 0.0},
+        ]
+    )
+
+    out = simulate_portfolio(
+        asset_alloc_df=asset_alloc_df,
+        liquidity_df=liquidity_df,
+        cash_flows_df=cash_flows_df,
+        baseline_return=0.0,
+        illiquidity_premium=0.0,
+        annual_dividend=0.0,
+        n_years=1,
+        include_year1_shock=False,
+        custom_period_returns=[0.0] * 4,
+        periods_per_year=4,
+    )
+
+    # 40% annual call should apply as 10% per quarter:
+    # quarter 1 buyout NAV pre-dividend: 100 + 10 = 110
+    first_period_items = out.loc[out["period"] == 1, "items"].iloc[0]
+    assert math.isclose(first_period_items["Buyout"]["nav_pre"], 110.0, abs_tol=1e-9)
+    assert math.isclose(first_period_items["Cash"]["nav_pre"], 90.0, abs_tol=1e-9)
+
+
 def test_initialize_liquidity_order_excludes_items_with_none_order():
     items = _items(
         LineItem("Cash", 0.0, 0.0, 1.0, 0.0),

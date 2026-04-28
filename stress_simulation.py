@@ -316,6 +316,7 @@ def _apply_private_cash_flows(
     items: Dict[str, LineItem],
     cash_flows: Dict[str, Dict[int, Tuple[float, float]]],
     year: int,
+    periods_per_year: int,
     baseline_return: float,
     illiquidity_premium: float,
     market_return: float,
@@ -334,6 +335,7 @@ def _apply_private_cash_flows(
         items: Mapping of line items.  Modified in place.
         cash_flows: Nested dictionary of cash flow fractions by item and year.
         year: Current projection year.
+        periods_per_year: Number of simulation periods in one year.
         baseline_return: Baseline return assumption (e.g. 0.08).
         illiquidity_premium: Additional return premium for private assets.
         market_return: The equity market return for this year (e.g. –0.40 for
@@ -360,6 +362,9 @@ def _apply_private_cash_flows(
             call_pct, dist_pct = cash_flows[name][year]
         else:
             call_pct, dist_pct = 0.0, 0.0
+        ppy = max(1, int(periods_per_year))
+        call_pct = call_pct / ppy
+        dist_pct = dist_pct / ppy
         # Compute call and distribution amounts based on the starting NAV
         call_amt = starting_nav * call_pct
         dist_amt = starting_nav * dist_pct
@@ -705,13 +710,15 @@ def simulate_portfolio(
             market_returns[k] = v
     private_cash_flow_items = set(cash_flows.keys())
     # Simulate each year
-    total_periods = max(1, int(n_years) * max(1, int(periods_per_year)))
+    ppy = max(1, int(periods_per_year))
+    total_periods = max(1, int(n_years) * ppy)
     for period in range(1, total_periods + 1):
+        simulation_year = ((period - 1) // ppy) + 1
         # Determine market return for this year
         if custom_period_returns is not None and period <= len(custom_period_returns):
             mr = float(custom_period_returns[period - 1])
-        elif period in market_returns:
-            mr = float(market_returns[period])
+        elif simulation_year in market_returns:
+            mr = float(market_returns[simulation_year])
         else:
             mr = float(rng.normal(loc=mean_return, scale=std_dev))
         # Apply returns in two branches:
@@ -726,7 +733,8 @@ def simulate_portfolio(
         _apply_private_cash_flows(
             items,
             cash_flows,
-            period,
+            simulation_year,
+            ppy,
             baseline_return,
             illiquidity_premium,
             mr,
@@ -776,8 +784,9 @@ def simulate_portfolio(
             for name, li in items.items()
         }
         results.append({
-            'year': period / max(1, int(periods_per_year)),
+            'year': period / ppy,
             'period': period,
+            'projection_year': simulation_year,
             'market_return': mr,
             'nav_total_pre': total_nav_pre,
             'beta_pre': beta_pre,
