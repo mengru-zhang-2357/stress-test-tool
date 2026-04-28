@@ -95,6 +95,7 @@ def build_app_ui() -> ui.NavbarPage:
             "Inputs",
             ui.tags.style("""
                 .row-action-btn { width: 220px; margin-top: 0.4rem; margin-bottom: 0.4rem; }
+                .upload-action-btn { width: 220px; margin-top: 0.2rem; margin-bottom: 0.6rem; }
                 .result-chart { margin-bottom: 1rem; }
             """),
             ui.layout_sidebar(
@@ -151,6 +152,7 @@ def build_app_ui() -> ui.NavbarPage:
                         accept=[".csv"],
                         multiple=False,
                     ),
+                    ui.input_action_button("clear_mc_return_upload", "✕ Clear uploaded return path", class_="btn-outline-secondary upload-action-btn"),
                     ui.download_button("download_mc_return_template_csv", "Download return template"),
                     ui.hr(),
                     ui.h5("Dividend NAV base"),
@@ -166,6 +168,7 @@ def build_app_ui() -> ui.NavbarPage:
                         accept=[".csv"],
                         multiple=False,
                     ),
+                    ui.input_action_button("clear_smoothed_nav_upload", "✕ Clear uploaded NAV history", class_="btn-outline-secondary upload-action-btn"),
                     ui.download_button("download_smoothed_nav_template_csv", "Download NAV template"),
                     ui.input_text("analysis_start_date", "Analysis start date (YYYY-MM-DD)", ""),
                     ui.input_numeric("smoothing_quarters", "Quarters to smooth over", 4),
@@ -185,6 +188,7 @@ def build_app_ui() -> ui.NavbarPage:
                     accept=[".csv"],
                     multiple=False,
                 ),
+                ui.input_action_button("clear_asset_alloc_upload", "✕ Undo uploaded CSV", class_="btn-outline-secondary upload-action-btn"),
                 # Buttons to add or delete rows in the asset allocation table
                 ui.input_action_button("add_asset_row", "Add row", class_="row-action-btn"),
                 ui.input_action_button("delete_asset_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
@@ -202,6 +206,7 @@ def build_app_ui() -> ui.NavbarPage:
                     accept=[".csv"],
                     multiple=False,
                 ),
+                ui.input_action_button("clear_liquidity_upload", "✕ Undo uploaded CSV", class_="btn-outline-secondary upload-action-btn"),
                 ui.input_action_button("add_liq_row", "Add row", class_="row-action-btn"),
                 ui.input_action_button("delete_liq_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
                 ui.br(),
@@ -217,9 +222,11 @@ def build_app_ui() -> ui.NavbarPage:
                     accept=[".csv"],
                     multiple=False,
                 ),
+                ui.input_action_button("clear_cash_flow_upload", "✕ Undo uploaded CSV", class_="btn-outline-secondary upload-action-btn"),
                 ui.input_action_button("add_cf_row", "Add row", class_="row-action-btn"),
                 ui.input_action_button("delete_cf_row", "Delete selected row(s)", class_="btn-danger row-action-btn"),
             ),
+            value="inputs_tab",
         ),
         # Second tab: results
         ui.nav_panel(
@@ -237,6 +244,7 @@ def build_app_ui() -> ui.NavbarPage:
                         ui.column(6, ui.div(output_widget("u_private_plot"), class_="result-chart")),
                     ),
                     ui.input_action_button("show_u_table", "Show underlying data", class_="btn-outline-secondary"),
+                    value="u_shaped",
                 ),
                 ui.accordion_panel(
                     "V-shaped",
@@ -249,6 +257,7 @@ def build_app_ui() -> ui.NavbarPage:
                         ui.column(6, ui.div(output_widget("v_private_plot"), class_="result-chart")),
                     ),
                     ui.input_action_button("show_v_table", "Show underlying data", class_="btn-outline-secondary"),
+                    value="v_shaped",
                 ),
                 ui.accordion_panel(
                     "Monte Carlo",
@@ -266,11 +275,15 @@ def build_app_ui() -> ui.NavbarPage:
                     ui.download_button("download_mc_nav_csv", "Download NAV fan data"),
                     ui.download_button("download_mc_beta_csv", "Download beta fan data"),
                     ui.download_button("download_mc_private_csv", "Download private % fan data"),
+                    value="monte_carlo",
                 ),
                 multiple=False,
+                id="results_accordion",
             ),
+            value="results_tab",
         ),
         title="Portfolio Stress Test",
+        id="main_nav",
         # Apply the Sandstone Bootswatch theme via shinyswatch.  The theme must
         # be passed to the `theme` argument of the page function (see
         # https://posit-dev.github.io/py-shinyswatch/reference/theme.sandstone.html)
@@ -288,6 +301,11 @@ def build_server():
         asset_df_val = reactive.value(default_asset_alloc.copy())
         liq_df_val = reactive.value(default_liquidity.copy())
         cf_df_val = reactive.value(default_cash_flows.copy())
+        prev_asset_df_val = reactive.value(default_asset_alloc.copy())
+        prev_liq_df_val = reactive.value(default_liquidity.copy())
+        prev_cf_df_val = reactive.value(default_cash_flows.copy())
+        use_mc_return_upload = reactive.value(True)
+        use_smoothed_nav_upload = reactive.value(True)
 
         def read_csv_path(csv_path: Path, required_columns: list[str]) -> pd.DataFrame:
             """Read and validate a CSV file from disk."""
@@ -351,12 +369,42 @@ def build_server():
             """
             return df.copy().astype(object)
 
+        def _parse_numeric_cell(value) -> float:
+            if value is None:
+                return 0.0
+            text = str(value).strip()
+            if not text:
+                return 0.0
+            normalized = text.replace("$", "").replace(",", "").replace("%", "")
+            try:
+                parsed = float(normalized)
+            except Exception:
+                return 0.0
+            return parsed
+
+        def _format_asset_alloc_for_display(df: pd.DataFrame) -> pd.DataFrame:
+            formatted = _grid_ready_df(df)
+            if 'Allocation' in formatted.columns:
+                formatted['Allocation'] = formatted['Allocation'].map(
+                    lambda x: f"${_parse_numeric_cell(x):,.0f}"
+                )
+            if 'Beta' in formatted.columns:
+                formatted['Beta'] = formatted['Beta'].map(
+                    lambda x: f"{_parse_numeric_cell(x):.2f}"
+                )
+            for col in ['Monthly Liquidity %', 'Private %']:
+                if col in formatted.columns:
+                    formatted[col] = formatted[col].map(
+                        lambda x: f"{(_parse_numeric_cell(x) if abs(_parse_numeric_cell(x)) > 1 else _parse_numeric_cell(x) * 100):.2f}%"
+                    )
+            return formatted
+
         @render.data_frame
         def asset_alloc_table():
             # Provide editable data grid for asset allocation.
             # Use selection_mode="rows" to enable row selection/editing when editable=True.
             return render.DataGrid(
-                _grid_ready_df(asset_df_val()),
+                _format_asset_alloc_for_display(asset_df_val()),
                 editable=True,
                 selection_mode="rows",
             )
@@ -384,6 +432,7 @@ def build_server():
             if not file_info:
                 return
             try:
+                prev_asset_df_val.set(asset_df_val().copy())
                 df = read_uploaded_csv(file_info, ASSET_ALLOC_COLUMNS)
                 asset_df_val.set(df.reset_index(drop=True))
                 ui.notification_show("Asset allocation CSV loaded.", type="message")
@@ -397,6 +446,7 @@ def build_server():
             if not file_info:
                 return
             try:
+                prev_liq_df_val.set(liq_df_val().copy())
                 df = read_uploaded_csv(file_info, LIQUIDITY_COLUMNS)
                 liq_df_val.set(df.reset_index(drop=True))
                 ui.notification_show("Liquidity waterfall CSV loaded.", type="message")
@@ -410,11 +460,54 @@ def build_server():
             if not file_info:
                 return
             try:
+                prev_cf_df_val.set(cf_df_val().copy())
                 df = read_uploaded_csv(file_info, CASH_FLOW_COLUMNS)
                 cf_df_val.set(df.reset_index(drop=True))
                 ui.notification_show("Private cash flow CSV loaded.", type="message")
             except Exception as exc:
                 ui.notification_show(f"Cash flow CSV upload failed: {exc}", type="error", duration=8)
+
+        @reactive.effect
+        @reactive.event(input.clear_asset_alloc_upload)
+        def clear_asset_alloc_upload_event():
+            asset_df_val.set(prev_asset_df_val().copy())
+            ui.notification_show("Reverted asset allocation upload.", type="message", duration=4)
+
+        @reactive.effect
+        @reactive.event(input.clear_liquidity_upload)
+        def clear_liquidity_upload_event():
+            liq_df_val.set(prev_liq_df_val().copy())
+            ui.notification_show("Reverted liquidity upload.", type="message", duration=4)
+
+        @reactive.effect
+        @reactive.event(input.clear_cash_flow_upload)
+        def clear_cash_flow_upload_event():
+            cf_df_val.set(prev_cf_df_val().copy())
+            ui.notification_show("Reverted cash flow upload.", type="message", duration=4)
+
+        @reactive.effect
+        @reactive.event(input.clear_mc_return_upload)
+        def clear_mc_return_upload_event():
+            use_mc_return_upload.set(False)
+            ui.notification_show("Uploaded return path will be ignored.", type="message", duration=4)
+
+        @reactive.effect
+        @reactive.event(input.clear_smoothed_nav_upload)
+        def clear_smoothed_nav_upload_event():
+            use_smoothed_nav_upload.set(False)
+            ui.notification_show("Uploaded smoothed NAV history will be ignored.", type="message", duration=4)
+
+        @reactive.effect
+        @reactive.event(input.mc_return_path_csv)
+        def enable_mc_return_upload_event():
+            if input.mc_return_path_csv():
+                use_mc_return_upload.set(True)
+
+        @reactive.effect
+        @reactive.event(input.smoothed_nav_csv)
+        def enable_smoothed_nav_upload_event():
+            if input.smoothed_nav_csv():
+                use_smoothed_nav_upload.set(True)
 
         # Handle adding new rows to each table when the user clicks the
         # corresponding Add row button.  These functions update the reactive
@@ -573,7 +666,12 @@ def build_server():
                 num_cols = ASSET_ALLOC_COLUMNS[1:]
                 for col in num_cols:
                     if col in df_asset.columns:
-                        df_asset[col] = pd.to_numeric(df_asset[col], errors='coerce').fillna(0.0)
+                        df_asset[col] = df_asset[col].map(_parse_numeric_cell)
+                for col in ['Monthly Liquidity %', 'Private %']:
+                    if col in df_asset.columns:
+                        df_asset[col] = df_asset[col].map(
+                            lambda x: x / 100.0 if abs(x) > 1.0 else x
+                        )
                 # Strip item names (ensure string type)
                 df_asset['Item'] = df_asset['Item'].astype(str)
             # Coerce numeric columns in liquidity table
@@ -604,6 +702,8 @@ def build_server():
             return 1
 
         def read_return_path_from_upload() -> list[float]:
+            if not use_mc_return_upload():
+                return []
             file_info = input.mc_return_path_csv()
             if not file_info:
                 return []
@@ -640,6 +740,8 @@ def build_server():
             yield template_df.to_csv(index=False)
 
         def _load_smoothed_nav_history() -> list[float]:
+            if not use_smoothed_nav_upload():
+                return []
             file_info = input.smoothed_nav_csv()
             if not file_info:
                 return []
@@ -1294,6 +1396,12 @@ def build_server():
         @reactive.effect
         def _store_mc_results():
             mc_results_val.set(mc_results())
+
+        @reactive.effect
+        @reactive.event(input.simulate)
+        def _focus_results_monte_carlo():
+            ui.update_navs("main_nav", selected="results_tab")
+            ui.update_accordion("results_accordion", show="monte_carlo")
 
         @reactive.effect
         @reactive.event(input.show_mc_table)
