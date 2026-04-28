@@ -638,6 +638,8 @@ def simulate_portfolio(
     include_year1_shock: bool = True,
     custom_period_returns: Optional[Sequence[float]] = None,
     periods_per_year: int = 1,
+    dividend_smoothing_periods: Optional[int] = None,
+    dividend_smoothed_nav_history: Optional[Sequence[float]] = None,
 ) -> pd.DataFrame:
     """Simulate the evolution of a portfolio over multiple years.
 
@@ -712,6 +714,10 @@ def simulate_portfolio(
     # Simulate each year
     ppy = max(1, int(periods_per_year))
     total_periods = max(1, int(n_years) * ppy)
+    nav_pre_history: List[float] = []
+    prior_nav_rebalanced = float(total_nav)
+    smoothing_periods = max(1, int(dividend_smoothing_periods)) if dividend_smoothing_periods else 0
+    smoothed_nav_history = [float(x) for x in (dividend_smoothed_nav_history or []) if pd.notna(x)]
     for period in range(1, total_periods + 1):
         simulation_year = ((period - 1) // ppy) + 1
         # Determine market return for this year
@@ -743,10 +749,18 @@ def simulate_portfolio(
         # Compute metrics before dividend
         total_nav_pre, beta_pre, private_pre = _compute_portfolio_metrics(items)
         monthly_liq_pre = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_pre if total_nav_pre > 0 else 0.0
+        if prior_nav_rebalanced > 0:
+            portfolio_return = (total_nav_pre / prior_nav_rebalanced) - 1.0
+        else:
+            portfolio_return = np.nan
         # Determine dividend amount for this year
         if annual_dividend > 0:
             if dividend_is_percent:
-                dividend_amt = annual_dividend * total_nav_pre
+                dividend_base = total_nav_pre
+                if smoothing_periods > 0:
+                    rolling_source = smoothed_nav_history + nav_pre_history + [float(total_nav_pre)]
+                    dividend_base = float(pd.Series(rolling_source).tail(smoothing_periods).mean())
+                dividend_amt = annual_dividend * dividend_base
             else:
                 dividend_amt = annual_dividend
         else:
@@ -763,6 +777,7 @@ def simulate_portfolio(
         # Compute metrics after dividend, before rebalancing
         total_nav_post, beta_post, private_post = _compute_portfolio_metrics(items)
         monthly_liq_post = sum(li.nav * li.monthly_liq for li in items.values()) / total_nav_post if total_nav_post > 0 else 0.0
+        dividend_paid = max(0.0, float(total_nav_pre - total_nav_post))
         # Rebalance if beta deviates
         _rebalance_portfolio(items, beta_start, liquidity_order, tolerance=0.02)
         item_metrics_rb = {name: li.nav for name, li in items.items()}
@@ -788,6 +803,8 @@ def simulate_portfolio(
             'period': period,
             'projection_year': simulation_year,
             'market_return': mr,
+            'dividend_paid': dividend_paid,
+            'portfolio_return': portfolio_return,
             'nav_total_pre': total_nav_pre,
             'beta_pre': beta_pre,
             'private_pre': private_pre,
@@ -802,6 +819,8 @@ def simulate_portfolio(
             'monthly_liq_total': monthly_liq_rb,
             'items': item_metrics,
         })
+        nav_pre_history.append(float(total_nav_pre))
+        prior_nav_rebalanced = float(total_nav_rb)
     # Convert to DataFrame
     df = pd.DataFrame(results)
     return df
@@ -824,6 +843,8 @@ def run_multiple_simulations(
     include_year1_shock: bool = False,
     custom_period_returns: Optional[Sequence[float]] = None,
     periods_per_year: int = 1,
+    dividend_smoothing_periods: Optional[int] = None,
+    dividend_smoothed_nav_history: Optional[Sequence[float]] = None,
 ) -> pd.DataFrame:
     """Run multiple simulation paths and return aggregated results.
 
@@ -871,6 +892,8 @@ def run_multiple_simulations(
             include_year1_shock=include_year1_shock,
             custom_period_returns=custom_period_returns,
             periods_per_year=periods_per_year,
+            dividend_smoothing_periods=dividend_smoothing_periods,
+            dividend_smoothed_nav_history=dividend_smoothed_nav_history,
         )
         for _, row in df.iterrows():
             records.append({
@@ -882,5 +905,7 @@ def run_multiple_simulations(
                 'private_total': row['private_total'],
                 'monthly_liq_total': row['monthly_liq_total'],
                 'market_return': row['market_return'],
+                'dividend_paid': row.get('dividend_paid', 0.0),
+                'portfolio_return': row.get('portfolio_return', np.nan),
             })
     return pd.DataFrame(records)

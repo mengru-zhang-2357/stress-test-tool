@@ -639,29 +639,28 @@ def build_server():
             )
             yield template_df.to_csv(index=False)
 
-        def _build_smoothed_nav_dividend_base(post_return_nav: float) -> float:
+        def _load_smoothed_nav_history() -> list[float]:
             file_info = input.smoothed_nav_csv()
             if not file_info:
-                return post_return_nav
+                return []
             try:
                 hist = pd.read_csv(Path(file_info[0]["datapath"]))
                 if hist.shape[1] < 2:
-                    return post_return_nav
+                    return []
                 hist = hist.iloc[:, :2].copy()
                 hist.columns = ["Date", "NAV"]
                 hist["Date"] = pd.to_datetime(hist["Date"], errors="coerce")
                 hist["NAV"] = pd.to_numeric(hist["NAV"], errors="coerce")
                 hist = hist.dropna(subset=["Date", "NAV"]).sort_values("Date")
                 if hist.empty:
-                    return post_return_nav
+                    return []
                 start_text = str(input.analysis_start_date() or "").strip()
                 if start_text:
                     current_date = pd.to_datetime(start_text, errors="coerce")
                     if pd.isna(current_date):
-                        return post_return_nav
+                        return []
                 else:
                     current_date = pd.Timestamp.today().normalize()
-                quarters = max(1, int(input.smoothing_quarters()))
                 quarter_end = (pd.Timestamp(current_date) + pd.offsets.QuarterEnd(0)).normalize()
                 hist_q = (
                     hist.set_index("Date")
@@ -671,12 +670,10 @@ def build_server():
                     .reset_index()
                 )
                 hist_q = hist_q[hist_q["Date"] <= quarter_end]
-                series_vals = hist_q["NAV"].tolist()
-                series_vals.append(float(post_return_nav))
-                return float(pd.Series(series_vals).tail(quarters).mean())
+                return pd.to_numeric(hist_q["NAV"], errors="coerce").dropna().astype(float).tolist()
             except Exception as exc:
                 ui.notification_show(f"Smoothed NAV CSV could not be read: {exc}", type="warning", duration=8)
-                return post_return_nav
+                return []
 
         def build_item_allocation_frame(scenario_df: pd.DataFrame, df_asset: pd.DataFrame) -> pd.DataFrame:
             """Build per-year, per-item NAV snapshots and private-contribution data."""
@@ -1258,14 +1255,13 @@ def build_server():
                 custom_returns = return_path[:total_periods]
             else:
                 custom_returns = None
+            smoothed_nav_history: list[float] = []
+            smoothing_periods: int | None = None
             if dividend_is_percent and str(input.dividend_nav_base()).lower().startswith("smoothed"):
-                # Use current (pre-dividend) NAV approximation as a smoothing anchor.
-                nav_anchor = float(df_asset["Allocation"].sum()) if not df_asset.empty else 0.0
-                div_base = _build_smoothed_nav_dividend_base(nav_anchor)
-                # Annualized percent-of-NAV dividend converted into per-period dollars.
-                annual_dividend_amount = div_amt * div_base
-                run_dividend = annual_dividend_amount / periods_per_year
-                run_dividend_is_percent = False
+                smoothed_nav_history = _load_smoothed_nav_history()
+                smoothing_periods = max(1, int(input.smoothing_quarters()))
+                run_dividend = div_amt / periods_per_year
+                run_dividend_is_percent = True
             elif not dividend_is_percent:
                 run_dividend = div_amt / periods_per_year
                 run_dividend_is_percent = False
@@ -1290,6 +1286,8 @@ def build_server():
                 include_year1_shock=False,
                 custom_period_returns=custom_returns,
                 periods_per_year=periods_per_year,
+                dividend_smoothing_periods=smoothing_periods,
+                dividend_smoothed_nav_history=smoothed_nav_history,
             )
             return res
 
